@@ -7,6 +7,8 @@
 #include <clang/ASTMatchers/ASTMatchers.h>
 #include <clang/Frontend/FrontendActions.h>
 #include <clang/Tooling/CommonOptionsParser.h>
+#include <clang/Tooling/Core/Replacement.h>
+#include <clang/Tooling/Refactoring.h>
 #include <clang/Tooling/Tooling.h>
 #include <llvm/Support/CommandLine.h>
 #include <unistd.h>
@@ -16,21 +18,30 @@ using namespace clang::ast_matchers;
 using namespace clang::tooling;
 using namespace llvm;
 
-StatementMatcher LoopMatcher =
-  forStmt(hasLoopInit(declStmt(hasSingleDecl(varDecl(
-						     hasInitializer(integerLiteral(equals(0)))))))).bind("forLoop");
+// Match various operations and convert these to Nova.
+class CPP_to_Nova : public clang::ast_matchers::MatchFinder::MatchCallback {
+private:
+  // Define some shorthand for a map from filename to replacement list.
+  using repl_map_t = std::map<std::string, clang::tooling::Replacements>;
 
-class LoopPrinter : public MatchFinder::MatchCallback {
-public :
-  virtual void run(const MatchFinder::MatchResult &Result) {
-    if (const ForStmt *FS = Result.Nodes.getNodeAs<clang::ForStmt>("forLoop"))
-      FS->dump();
+  // List of replacements to make.
+  repl_map_t& replacements;
+
+public:
+  explicit CPP_to_Nova(repl_map_t& repls) : replacements(repls) {}
+  
+  // Add a set of matchers to a finder.
+  void add_matchers(MatchFinder& mfinder) {
+    mfinder.addMatcher(integerLiteral().bind("int-lit"), this);
+  }
+  
+  virtual void run(const MatchFinder::MatchResult& mresult) {
   }
 };
 
 // Prepare --help to output some helpful information.
-static llvm::cl::OptionCategory C2NToolCategory("cpp2nova options");
-static cl::extrahelp CommonHelp(CommonOptionsParser::HelpMessage);
+static llvm::cl::OptionCategory c2n_opts("cpp2nova options");
+//static cl::extrahelp CommonHelp(CommonOptionsParser::HelpMessage);
 
 // As a user, I hate having to append "--" to the command line when running a
 // Clang tool.  If we don't see a "--", append it ourself.
@@ -60,6 +71,20 @@ int main(int argc, const char **argv) {
   }
 
   // Parse the command line.
+  auto opt_parser = CommonOptionsParser::create(argc, argv, c2n_opts, llvm::cl::OneOrMore);
+  if (!opt_parser) {
+    llvm::errs() << opt_parser.takeError();
+    return 1;
+  }
+
+  // Instantiate our Clang tool.
+  RefactoringTool tool(opt_parser->getCompilations(), opt_parser->getSourcePathList());
+  CPP_to_Nova c2n(tool.getReplacements());
+  MatchFinder mfinder;
+  c2n.add_matchers(mfinder);
+  return 0;
+  
+  /*  
   auto ExpectedParser = CommonOptionsParser::create(argc, argv, C2NToolCategory, llvm::cl::OneOrMore);
   if (!ExpectedParser) {
     llvm::errs() << ExpectedParser.takeError();
@@ -74,4 +99,5 @@ int main(int argc, const char **argv) {
   MatchFinder Finder;
   Finder.addMatcher(LoopMatcher, &Printer);
   return Tool.run(newFrontendActionFactory(&Finder).get());
+  */
 }

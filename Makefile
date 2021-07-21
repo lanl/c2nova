@@ -16,10 +16,14 @@ LIBS = \
 	-lclangSerialization \
 	-lclangFrontend \
 	-lclangDriver \
+	-lclangToolingCore \
+	-lclangRewrite \
+	-lclangFormat \
 	-lclangLex \
 	-lclangSema \
 	-lclangParse \
 	-lclangEdit \
+	-lclangToolingInclusions \
 	-lclangAnalysis \
 	-Wl,--end-group
 
