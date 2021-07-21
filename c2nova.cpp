@@ -11,9 +11,9 @@
 #include <clang/Tooling/Refactoring.h>
 #include <clang/Tooling/Tooling.h>
 #include <llvm/Support/CommandLine.h>
-#include <filesystem>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <unistd.h>
 
 using namespace clang;
@@ -106,7 +106,7 @@ bool append_ddash(int argc, const char **argv) {
 }
 
 // Copy a file to a working file.  Return the name of the working file.
-std::string copy_file_to_working(std::string iname) {
+std::string copy_input_to_working(std::string iname) {
   // Create a working file with a random name.
   std::string tmpl_str(fs::temp_directory_path().append("c2nova-XXXXXX"));
   char* tmpl = strdup(tmpl_str.c_str());
@@ -119,6 +119,19 @@ std::string copy_file_to_working(std::string iname) {
   fs::path oname = fs::path(tmpl);
   fs::copy_file(iname, oname, fs::copy_options::overwrite_existing);
   return std::string(oname);
+}
+
+// Move the working file to the output file.
+void move_working_to_output(fs::path iname, fs::path wname, fs::path oname) {
+  // If the output name is empty, assign it a name derived from the input name.
+  if (oname == "") {
+    oname = fs::path(iname).replace_extension(".nova");
+    if (oname == iname)
+      oname += ".c";   // Don't implicitly overwrite the input file.
+  }
+
+  // Rename the working file to the output file.
+  fs::rename(wname, oname);
 }
 
 int main(int argc, const char **argv) {
@@ -137,7 +150,8 @@ int main(int argc, const char **argv) {
   }
 
   // Copy the input file to a working file so we can modify it in place.
-  std::string wname = copy_file_to_working(opt_parser->getSourcePathList()[0]);
+  std::string iname(opt_parser->getSourcePathList()[0]);
+  std::string wname = copy_input_to_working(iname);
   std::vector<std::string> sources(1, wname);
 
   // Instantiate and prepare our Clang tool.
@@ -147,6 +161,11 @@ int main(int argc, const char **argv) {
   c2n.add_matchers(mfinder);
 
   // Run our Clang tool.
-  tool.run(newFrontendActionFactory(&mfinder).get());
+  int run_result = tool.runAndSave(newFrontendActionFactory(&mfinder).get());
+  if (run_result != 0)
+    return run_result;
+
+  // Move the working file to the output file.
+  move_working_to_output(iname, wname, fs::path(std::string(outfile)));
   return 0;
 }
