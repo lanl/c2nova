@@ -10,11 +10,12 @@ LLVM_LDFLAGS = $(shell llvm-config --ldflags --libs --system-libs)
 LIBS = \
 	-Wl,--start-group \
 	-lclangTooling \
-	-lclangSerialization \
+	-lclangASTMatchers \
+	-lclangAST \
 	-lclangBasic \
+	-lclangSerialization \
 	-lclangFrontend \
 	-lclangDriver \
-	-lclangAST \
 	-lclangLex \
 	-lclangSema \
 	-lclangParse \

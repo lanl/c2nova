@@ -3,16 +3,32 @@
  * By Scott Pakin <pakin@lanl.gov> *
  ***********************************/
 
+#include <clang/ASTMatchers/ASTMatchFinder.h>
+#include <clang/ASTMatchers/ASTMatchers.h>
 #include <clang/Frontend/FrontendActions.h>
 #include <clang/Tooling/CommonOptionsParser.h>
 #include <clang/Tooling/Tooling.h>
 #include <llvm/Support/CommandLine.h>
 #include <unistd.h>
 
+using namespace clang;
+using namespace clang::ast_matchers;
 using namespace clang::tooling;
 using namespace llvm;
 
-// Prepare --help to output basic helpful information.
+StatementMatcher LoopMatcher =
+  forStmt(hasLoopInit(declStmt(hasSingleDecl(varDecl(
+						     hasInitializer(integerLiteral(equals(0)))))))).bind("forLoop");
+
+class LoopPrinter : public MatchFinder::MatchCallback {
+public :
+  virtual void run(const MatchFinder::MatchResult &Result) {
+    if (const ForStmt *FS = Result.Nodes.getNodeAs<clang::ForStmt>("forLoop"))
+      FS->dump();
+  }
+};
+
+// Prepare --help to output some helpful information.
 static llvm::cl::OptionCategory C2NToolCategory("cpp2nova options");
 static cl::extrahelp CommonHelp(CommonOptionsParser::HelpMessage);
 
@@ -54,5 +70,8 @@ int main(int argc, const char **argv) {
   // Run our tool on the specified source file.
   ClangTool Tool(OptionsParser.getCompilations(),
                  OptionsParser.getSourcePathList());
-  return Tool.run(newFrontendActionFactory<clang::SyntaxOnlyAction>().get());
+  LoopPrinter Printer;
+  MatchFinder Finder;
+  Finder.addMatcher(LoopMatcher, &Printer);
+  return Tool.run(newFrontendActionFactory(&Finder).get());
 }
