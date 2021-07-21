@@ -1,5 +1,5 @@
 ###################################
-# Build cpp2nova                  #
+# Build c2nova                    #
 # By Scott Pakin <pakin@lanl.gov> #
 ###################################
 
@@ -27,15 +27,15 @@ LIBS = \
 	-lclangAnalysis \
 	-Wl,--end-group
 
-all: cpp2nova
+all: c2nova
 
-cpp2nova.o: cpp2nova.cpp
-	$(CXX) -c -o cpp2nova.o $(LLVM_CXXFLAGS) $(CXXFLAGS) cpp2nova.cpp
+c2nova.o: c2nova.cpp
+	$(CXX) -c -o c2nova.o $(LLVM_CXXFLAGS) $(CXXFLAGS) c2nova.cpp
 
-cpp2nova: cpp2nova.o
-	$(CXX) -o cpp2nova cpp2nova.o $(LLVM_LDFLAGS) $(LIBS)
+c2nova: c2nova.o
+	$(CXX) -o c2nova c2nova.o $(LLVM_LDFLAGS) $(LIBS)
 
 clean:
-	$(RM) cpp2nova.o cpp2nova
+	$(RM) c2nova.o c2nova
 
 .PHONY: all clean

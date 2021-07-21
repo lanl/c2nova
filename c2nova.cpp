@@ -19,7 +19,7 @@ using namespace clang::tooling;
 using namespace llvm;
 
 // Match various operations and convert these to Nova.
-class CPP_to_Nova : public clang::ast_matchers::MatchFinder::MatchCallback {
+class C_to_Nova : public clang::ast_matchers::MatchFinder::MatchCallback {
 private:
   // Define some shorthand for a map from filename to replacement list.
   using repl_map_t = std::map<std::string, clang::tooling::Replacements>;
@@ -28,14 +28,21 @@ private:
   repl_map_t& replacements;
 
 public:
-  explicit CPP_to_Nova(repl_map_t& repls) : replacements(repls) {}
-  
+  // Store the set of replacements we were given to modify.
+  explicit C_to_Nova(repl_map_t& repls) : replacements(repls) {}
+
   // Add a set of matchers to a finder.
   void add_matchers(MatchFinder& mfinder) {
     mfinder.addMatcher(integerLiteral().bind("int-lit"), this);
   }
-  
+
+  // Process all of our matches.
   virtual void run(const MatchFinder::MatchResult& mresult) {
+    const IntegerLiteral* intLit = mresult.Nodes.getNodeAs<IntegerLiteral>("int-lit");
+
+    // Temporary
+    llvm::errs() << "Look what I got:\n";
+    intLit->dump();
   }
 };
 
@@ -66,7 +73,7 @@ int main(int argc, const char **argv) {
   // Append a "--" to the command line if none is already present.
   if (!append_ddash(argc, argv)) {
     llvm::errs() << "failed to restart " << argv[0] << "("
-		 << std::strerror(errno) << ")\n";
+                 << std::strerror(errno) << ")\n";
     return 1;
   }
 
@@ -77,27 +84,13 @@ int main(int argc, const char **argv) {
     return 1;
   }
 
-  // Instantiate our Clang tool.
+  // Instantiate and prepare our Clang tool.
   RefactoringTool tool(opt_parser->getCompilations(), opt_parser->getSourcePathList());
-  CPP_to_Nova c2n(tool.getReplacements());
+  C_to_Nova c2n(tool.getReplacements());
   MatchFinder mfinder;
   c2n.add_matchers(mfinder);
-  return 0;
-  
-  /*  
-  auto ExpectedParser = CommonOptionsParser::create(argc, argv, C2NToolCategory, llvm::cl::OneOrMore);
-  if (!ExpectedParser) {
-    llvm::errs() << ExpectedParser.takeError();
-    return 1;
-  }
-  CommonOptionsParser& OptionsParser = ExpectedParser.get();
 
-  // Run our tool on the specified source file.
-  ClangTool Tool(OptionsParser.getCompilations(),
-                 OptionsParser.getSourcePathList());
-  LoopPrinter Printer;
-  MatchFinder Finder;
-  Finder.addMatcher(LoopMatcher, &Printer);
-  return Tool.run(newFrontendActionFactory(&Finder).get());
-  */
+  // Run our Clang tool.
+  tool.run(newFrontendActionFactory(&mfinder).get());
+  return 0;
 }
