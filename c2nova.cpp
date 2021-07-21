@@ -27,6 +27,17 @@ private:
   // List of replacements to make.
   repl_map_t& replacements;
 
+  // Return the text corresponding to a source range.
+  std::string get_text(SourceManager& sm, SourceRange& sr) {
+    SourceLocation ofs0(sr.getBegin());
+    SourceLocation ofs1_begin(sr.getEnd());
+    LangOptions lopt;
+    SourceLocation ofs1(Lexer::getLocForEndOfToken(ofs1_begin, 0, sm, lopt));
+    const char* ptr0(sm.getCharacterData(ofs0));
+    const char* ptr1(sm.getCharacterData(ofs1));
+    return std::string(ptr0, ptr1);
+  }
+
 public:
   // Store the set of replacements we were given to modify.
   explicit C_to_Nova(repl_map_t& repls) : replacements(repls) {}
@@ -38,11 +49,19 @@ public:
 
   // Process all of our matches.
   virtual void run(const MatchFinder::MatchResult& mresult) {
+    SourceManager& sm(mresult.Context->getSourceManager());
+ 
+    // Replace integer literals.
     const IntegerLiteral* intLit = mresult.Nodes.getNodeAs<IntegerLiteral>("int-lit");
+    if (intLit) {
+      // Wrap the integer literal with "IntConst".
+      SourceRange sr(intLit->getSourceRange());
 
-    // Temporary
-    llvm::errs() << "Look what I got:\n";
-    intLit->dump();
+      // Temporary
+      llvm::errs() << "I found " << get_text(sm, sr) << " at " << sr.printToString(sm) << ":\n";
+      intLit->dump();
+
+    }
   }
 };
 
