@@ -11,12 +11,21 @@
 #include <clang/Tooling/Refactoring.h>
 #include <clang/Tooling/Tooling.h>
 #include <llvm/Support/CommandLine.h>
+#include <filesystem>
+#include <cstdio>
+#include <cstdlib>
 #include <unistd.h>
 
 using namespace clang;
 using namespace clang::ast_matchers;
 using namespace clang::tooling;
 using namespace llvm;
+namespace fs = std::filesystem;
+
+// Prepare --help to output some helpful information.
+static llvm::cl::OptionCategory c2n_opts("cpp2nova options");
+static cl::opt<std::string> outfile("o", cl::desc("specify output filename"), cl::value_desc("output.c"));
+static cl::extrahelp CommonHelp(CommonOptionsParser::HelpMessage);
 
 // Match various operations and convert these to Nova.
 class C_to_Nova : public clang::ast_matchers::MatchFinder::MatchCallback {
@@ -50,27 +59,34 @@ public:
   // Process all of our matches.
   virtual void run(const MatchFinder::MatchResult& mresult) {
     SourceManager& sm(mresult.Context->getSourceManager());
- 
+
     // Replace integer literals.
     const IntegerLiteral* intLit = mresult.Nodes.getNodeAs<IntegerLiteral>("int-lit");
     if (intLit) {
       // Wrap the integer literal with "IntConst".
       SourceRange sr(intLit->getSourceRange());
+      SourceLocation ofs0(sr.getBegin());
+      std::string text(get_text(sm, sr));
+      Replacement rep(sm, ofs0, text.length(), "IntConst(" + text + ")");
+      std::string fname(sm.getFilename(ofs0).str());
+      if (replacements[fname].add(rep)) {
+        llvm::errs() << "failed to perform replacement: " << rep.toString() << "\n";
+        return;
+      }
 
       // Temporary
-      llvm::errs() << "I found " << get_text(sm, sr) << " at " << sr.printToString(sm) << ":\n";
+      llvm::errs() << "I found " << text << " at " << sr.printToString(sm)
+                   << " and am replacing it with " << rep.toString() << ":\n";
       intLit->dump();
 
     }
   }
 };
 
-// Prepare --help to output some helpful information.
-static llvm::cl::OptionCategory c2n_opts("cpp2nova options");
-//static cl::extrahelp CommonHelp(CommonOptionsParser::HelpMessage);
-
 // As a user, I hate having to append "--" to the command line when running a
-// Clang tool.  If we don't see a "--", append it ourself.
+// Clang tool.  If we don't see a "--", append it ourself.  Also append
+// "--language=c" in that case so Clang doesn't complain about our
+// extensionless working file.
 bool append_ddash(int argc, const char **argv) {
   // Return true if the command line already contains a double-dash.
   for (int i = 1; i < argc; i++)
@@ -78,14 +94,31 @@ bool append_ddash(int argc, const char **argv) {
       return true;
 
   // No double dash: append one and restart the program.
-  char **new_argv = new char *[argc + 2];
+  char **new_argv = new char *[argc + 3];
   for (int i = 0; i < argc; i++)
     new_argv[i] = strdup(argv[i]);
   new_argv[argc] = strdup("--");
-  new_argv[argc + 1] = nullptr;
+  new_argv[argc + 1] = strdup("--language=c");
+  new_argv[argc + 2] = nullptr;
   if (execvp(argv[0], new_argv) == -1)
     return false;
   return true; // We should never get here.
+}
+
+// Copy a file to a working file.  Return the name of the working file.
+std::string copy_file_to_working(std::string iname) {
+  // Create a working file with a random name.
+  std::string tmpl_str(fs::temp_directory_path().append("c2nova-XXXXXX"));
+  char* tmpl = strdup(tmpl_str.c_str());
+  if (mkstemp(tmpl) == -1) {
+    llvm::errs() << "failed to create a file from template " << tmpl << "\n";
+    std::exit(1);
+  }
+
+  // Overwrite the working file with the input file.
+  fs::path oname = fs::path(tmpl);
+  fs::copy_file(iname, oname, fs::copy_options::overwrite_existing);
+  return std::string(oname);
 }
 
 int main(int argc, const char **argv) {
@@ -97,14 +130,18 @@ int main(int argc, const char **argv) {
   }
 
   // Parse the command line.
-  auto opt_parser = CommonOptionsParser::create(argc, argv, c2n_opts, llvm::cl::OneOrMore);
+  auto opt_parser = CommonOptionsParser::create(argc, argv, c2n_opts, cl::Required);
   if (!opt_parser) {
     llvm::errs() << opt_parser.takeError();
     return 1;
   }
 
+  // Copy the input file to a working file so we can modify it in place.
+  std::string wname = copy_file_to_working(opt_parser->getSourcePathList()[0]);
+  std::vector<std::string> sources(1, wname);
+
   // Instantiate and prepare our Clang tool.
-  RefactoringTool tool(opt_parser->getCompilations(), opt_parser->getSourcePathList());
+  RefactoringTool tool(opt_parser->getCompilations(), sources);
   C_to_Nova c2n(tool.getReplacements());
   MatchFinder mfinder;
   c2n.add_matchers(mfinder);
