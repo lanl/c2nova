@@ -47,6 +47,36 @@ private:
     return std::string(ptr0, ptr1);
   }
 
+  // Wrap integer literals with "IntConst".
+  void process_integer_literals(const MatchFinder::MatchResult& mresult) {
+    const IntegerLiteral* intLit = mresult.Nodes.getNodeAs<IntegerLiteral>("int-lit");
+    if (intLit == nullptr)
+      return;
+    SourceManager& sm(mresult.Context->getSourceManager());
+    SourceRange sr(intLit->getSourceRange());
+    SourceLocation ofs0(sr.getBegin());
+    std::string text(get_text(sm, sr));
+    Replacement rep(sm, ofs0, text.length(), "IntConst(" + text + ")");
+    std::string fname(sm.getFilename(ofs0).str());
+    if (replacements[fname].add(rep))
+      llvm::errs() << "failed to perform replacement: " << rep.toString() << "\n";
+  }
+
+  // Wrap floating-point literals with "AConst".
+  void process_float_literals(const MatchFinder::MatchResult& mresult) {
+    const FloatingLiteral* floatLit = mresult.Nodes.getNodeAs<FloatingLiteral>("float-lit");
+    if (floatLit == nullptr)
+      return;
+    SourceManager& sm(mresult.Context->getSourceManager());
+    SourceRange sr(floatLit->getSourceRange());
+    SourceLocation ofs0(sr.getBegin());
+    std::string text(get_text(sm, sr));
+    Replacement rep(sm, ofs0, text.length(), "Aconst(" + text + ")");
+    std::string fname(sm.getFilename(ofs0).str());
+    if (replacements[fname].add(rep))
+      llvm::errs() << "failed to perform replacement: " << rep.toString() << "\n";
+  }
+
 public:
   // Store the set of replacements we were given to modify.
   explicit C_to_Nova(repl_map_t& repls) : replacements(repls) {}
@@ -54,32 +84,13 @@ public:
   // Add a set of matchers to a finder.
   void add_matchers(MatchFinder& mfinder) {
     mfinder.addMatcher(integerLiteral().bind("int-lit"), this);
+    mfinder.addMatcher(floatLiteral().bind("float-lit"), this);
   }
 
   // Process all of our matches.
   virtual void run(const MatchFinder::MatchResult& mresult) {
-    SourceManager& sm(mresult.Context->getSourceManager());
-
-    // Replace integer literals.
-    const IntegerLiteral* intLit = mresult.Nodes.getNodeAs<IntegerLiteral>("int-lit");
-    if (intLit) {
-      // Wrap the integer literal with "IntConst".
-      SourceRange sr(intLit->getSourceRange());
-      SourceLocation ofs0(sr.getBegin());
-      std::string text(get_text(sm, sr));
-      Replacement rep(sm, ofs0, text.length(), "IntConst(" + text + ")");
-      std::string fname(sm.getFilename(ofs0).str());
-      if (replacements[fname].add(rep)) {
-        llvm::errs() << "failed to perform replacement: " << rep.toString() << "\n";
-        return;
-      }
-
-      // Temporary
-      llvm::errs() << "I found " << text << " at " << sr.printToString(sm)
-                   << " and am replacing it with " << rep.toString() << ":\n";
-      intLit->dump();
-
-    }
+    process_integer_literals(mresult);
+    process_float_literals(mresult);
   }
 };
 
