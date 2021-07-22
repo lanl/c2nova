@@ -62,9 +62,9 @@ private:
     return std::string(ptr0, ptr1);
   }
 
-  // Wrap integer/float variable declarations with "ApeVar" or "ApeVarInit", as
-  // appropriate.  This serves a helper function for process_integer_decl() and
-  // process_float_decl().
+  // Wrap integer/float variable declarations with "DeclareApeVar" or
+  // "DeclareApeVarInit", as appropriate.  This serves a helper function for
+  // process_integer_decl() and process_float_decl().
   void process_var_decl(const MatchFinder::MatchResult& mresult,
                         const StringRef bind_name,
                         const std::string nova_type) {
@@ -85,7 +85,7 @@ private:
     std::string fname(sm.getFilename(ofs0).str());
     if (rhs == nullptr) {
       // No initializer.
-      Replacement rep(sm, ofs0, text.length(), "ApeVar(" + var_name + ", " + nova_type + ")");
+      Replacement rep(sm, ofs0, text.length(), "DeclareApeVar(" + var_name + ", " + nova_type + ")");
       if (replacements[fname].add(rep))
         llvm::errs() << "failed to perform replacement: " << rep.toString() << "\n";
     }
@@ -98,7 +98,7 @@ private:
       SourceRange rhs_sr(rhs->getSourceRange());
       SourceLocation rhs_ofs0(rhs_sr.getBegin());
       const char* rhs_ptr0(sm.getCharacterData(rhs_ofs0));
-      Replacement rep1(sm, ofs0, rhs_ptr0 - ptr0, "ApeVarInit(" + var_name + ", " + nova_type + ", ");
+      Replacement rep1(sm, ofs0, rhs_ptr0 - ptr0, "DeclareApeVarInit(" + var_name + ", " + nova_type + ", ");
       if (replacements[fname].add(rep1))
         llvm::errs() << "failed to perform replacement: " << rep1.toString() << "\n";
       SourceLocation ofs1(get_end_of_end(sm, sr));
@@ -108,12 +108,12 @@ private:
     }
   }
 
-  // Wrap integer variable declarations with "ApeVar" or "ApeVarInit".
+  // Wrap integer variable declarations with "DeclareApeVar" or "DeclareApeVarInit".
   void process_int_var_decl(const MatchFinder::MatchResult& mresult) {
     process_var_decl(mresult, StringRef("int-decl"), std::string("Int"));
   }
 
-  // Wrap floating-point variable declarations with "ApeVar" or "ApeVarInit".
+  // Wrap floating-point variable declarations with "DeclareApeVar" or "DeclareApeVarInit".
   void process_float_var_decl(const MatchFinder::MatchResult& mresult) {
     process_var_decl(mresult, StringRef("float-decl"), std::string("Approx"));
   }
