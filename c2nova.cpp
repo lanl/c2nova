@@ -69,24 +69,24 @@ private:
 
     // Extract the variable name.
     std::string var_name(get_ident(sm, decl->getLocation()));
-    
+
     // Generate a replacement either with or without an initializer.
     const Expr* rhs = mresult.Nodes.getNodeAs<Expr>("rhs");
     Replacement rep;
     if (rhs == nullptr)
       rep = Replacement(sm, ofs0, text.length(),
-			"ApeVar(" + var_name + ", Int)");
+                        "ApeVar(" + var_name + ", Int)");
     else {
       SourceRange rhs_sr(rhs->getSourceRange());
       std::string rhs_text(get_text(sm, rhs_sr));
       rep = Replacement(sm, ofs0, text.length(),
-			"ApeVarInit(" + var_name + ", Int, " + rhs_text + ")");
+                        "ApeVarInit(" + var_name + ", Int, " + rhs_text + ")");
     }
     std::string fname(sm.getFilename(ofs0).str());
     if (replacements[fname].add(rep))
       llvm::errs() << "failed to perform replacement: " << rep.toString() << "\n";
   }
-  
+
   // Wrap integer literals with "IntConst".
   void process_integer_literal(const MatchFinder::MatchResult& mresult) {
     const IntegerLiteral* intLit = mresult.Nodes.getNodeAs<IntegerLiteral>("int-lit");
@@ -125,13 +125,12 @@ public:
   void add_matchers(MatchFinder& mfinder) {
     mfinder.addMatcher(integerLiteral().bind("int-lit"), this);
     mfinder.addMatcher(floatLiteral().bind("float-lit"), this);
-    //mfinder.addMatcher(varDecl(hasType(isInteger())).bind("decl"), this);
     mfinder.addMatcher(varDecl(hasType(isInteger()),
-			       unless(hasInitializer(expr().bind("rhs"))))
-		       .bind("decl"), this);
+                               unless(hasInitializer(expr().bind("rhs"))))
+                       .bind("decl"), this);
     mfinder.addMatcher(varDecl(hasType(isInteger()),
-			       hasInitializer(expr().bind("rhs")))
-		       .bind("decl"), this);
+                               hasInitializer(expr().bind("rhs")))
+                       .bind("decl"), this);
   }
 
   // Process all of our matches.

@@ -13,13 +13,13 @@ LIBS = \
 	-lclangASTMatchers \
 	-lclangAST \
 	-lclangBasic \
+	-lclangToolingCore \
+	-lclangLex \
 	-lclangSerialization \
 	-lclangFrontend \
 	-lclangDriver \
-	-lclangToolingCore \
 	-lclangRewrite \
 	-lclangFormat \
-	-lclangLex \
 	-lclangSema \
 	-lclangParse \
 	-lclangEdit \
