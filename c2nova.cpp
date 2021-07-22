@@ -47,8 +47,48 @@ private:
     return std::string(ptr0, ptr1);
   }
 
+  // Return an identifier found at a given location.
+  std::string get_ident(SourceManager& sm, SourceLocation id_begin) {
+    LangOptions lopt;
+    SourceLocation id_end(Lexer::getLocForEndOfToken(id_begin, 0, sm, lopt));
+    const char* ptr0(sm.getCharacterData(id_begin));
+    const char* ptr1(sm.getCharacterData(id_end));
+    return std::string(ptr0, ptr1);
+  }
+
+  // Wrap integer variable declarations with "ApeVar".
+  void process_integer_decl(const MatchFinder::MatchResult& mresult) {
+    // Extract the declaration in both raw and textual forms.
+    const Decl* decl = mresult.Nodes.getNodeAs<Decl>("decl");
+    if (decl == nullptr)
+      return;
+    SourceManager& sm(mresult.Context->getSourceManager());
+    SourceRange sr(decl->getSourceRange());
+    SourceLocation ofs0(sr.getBegin());
+    std::string text(get_text(sm, sr));
+
+    // Extract the variable name.
+    std::string var_name(get_ident(sm, decl->getLocation()));
+    
+    // Generate a replacement either with or without an initializer.
+    const Expr* rhs = mresult.Nodes.getNodeAs<Expr>("rhs");
+    Replacement rep;
+    if (rhs == nullptr)
+      rep = Replacement(sm, ofs0, text.length(),
+			"ApeVar(" + var_name + ", Int)");
+    else {
+      SourceRange rhs_sr(rhs->getSourceRange());
+      std::string rhs_text(get_text(sm, rhs_sr));
+      rep = Replacement(sm, ofs0, text.length(),
+			"ApeVarInit(" + var_name + ", Int, " + rhs_text + ")");
+    }
+    std::string fname(sm.getFilename(ofs0).str());
+    if (replacements[fname].add(rep))
+      llvm::errs() << "failed to perform replacement: " << rep.toString() << "\n";
+  }
+  
   // Wrap integer literals with "IntConst".
-  void process_integer_literals(const MatchFinder::MatchResult& mresult) {
+  void process_integer_literal(const MatchFinder::MatchResult& mresult) {
     const IntegerLiteral* intLit = mresult.Nodes.getNodeAs<IntegerLiteral>("int-lit");
     if (intLit == nullptr)
       return;
@@ -63,7 +103,7 @@ private:
   }
 
   // Wrap floating-point literals with "AConst".
-  void process_float_literals(const MatchFinder::MatchResult& mresult) {
+  void process_float_literal(const MatchFinder::MatchResult& mresult) {
     const FloatingLiteral* floatLit = mresult.Nodes.getNodeAs<FloatingLiteral>("float-lit");
     if (floatLit == nullptr)
       return;
@@ -85,12 +125,20 @@ public:
   void add_matchers(MatchFinder& mfinder) {
     mfinder.addMatcher(integerLiteral().bind("int-lit"), this);
     mfinder.addMatcher(floatLiteral().bind("float-lit"), this);
+    //mfinder.addMatcher(varDecl(hasType(isInteger())).bind("decl"), this);
+    mfinder.addMatcher(varDecl(hasType(isInteger()),
+			       unless(hasInitializer(expr().bind("rhs"))))
+		       .bind("decl"), this);
+    mfinder.addMatcher(varDecl(hasType(isInteger()),
+			       hasInitializer(expr().bind("rhs")))
+		       .bind("decl"), this);
   }
 
   // Process all of our matches.
   virtual void run(const MatchFinder::MatchResult& mresult) {
-    process_integer_literals(mresult);
-    process_float_literals(mresult);
+    process_integer_literal(mresult);
+    process_float_literal(mresult);
+    process_integer_decl(mresult);
   }
 };
 

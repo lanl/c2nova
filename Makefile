@@ -4,7 +4,7 @@
 ###################################
 
 CXX = clang++
-CXXFLAGS = -g -std=c++17
+CXXFLAGS = -g -std=c++17 -Wall
 LLVM_CXXFLAGS = $(shell llvm-config --cxxflags)
 LLVM_LDFLAGS = $(shell llvm-config --ldflags --libs --system-libs)
 LIBS = \
