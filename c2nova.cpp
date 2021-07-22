@@ -62,10 +62,14 @@ private:
     return std::string(ptr0, ptr1);
   }
 
-  // Wrap integer variable declarations with "ApeVar".
-  void process_integer_decl(const MatchFinder::MatchResult& mresult) {
+  // Wrap integer/float variable declarations with "ApeVar" or "ApeVarInit", as
+  // appropriate.  This serves a helper function for process_integer_decl() and
+  // process_float_decl().
+  void process_var_decl(const MatchFinder::MatchResult& mresult,
+                        const StringRef bind_name,
+                        const std::string nova_type) {
     // Extract the declaration in both raw and textual forms.
-    const Decl* decl = mresult.Nodes.getNodeAs<Decl>("decl");
+    const Decl* decl = mresult.Nodes.getNodeAs<Decl>(bind_name);
     if (decl == nullptr)
       return;
     SourceManager& sm(mresult.Context->getSourceManager());
@@ -81,7 +85,7 @@ private:
     std::string fname(sm.getFilename(ofs0).str());
     if (rhs == nullptr) {
       // No initializer.
-      Replacement rep(sm, ofs0, text.length(), "ApeVar(" + var_name + ", Int)");
+      Replacement rep(sm, ofs0, text.length(), "ApeVar(" + var_name + ", " + nova_type + ")");
       if (replacements[fname].add(rep))
         llvm::errs() << "failed to perform replacement: " << rep.toString() << "\n";
     }
@@ -94,7 +98,7 @@ private:
       SourceRange rhs_sr(rhs->getSourceRange());
       SourceLocation rhs_ofs0(rhs_sr.getBegin());
       const char* rhs_ptr0(sm.getCharacterData(rhs_ofs0));
-      Replacement rep1(sm, ofs0, rhs_ptr0 - ptr0, "ApeVarInit(" + var_name + ", Int, ");
+      Replacement rep1(sm, ofs0, rhs_ptr0 - ptr0, "ApeVarInit(" + var_name + ", " + nova_type + ", ");
       if (replacements[fname].add(rep1))
         llvm::errs() << "failed to perform replacement: " << rep1.toString() << "\n";
       SourceLocation ofs1(get_end_of_end(sm, sr));
@@ -102,6 +106,16 @@ private:
       if (replacements[fname].add(rep2))
         llvm::errs() << "failed to perform replacement: " << rep2.toString() << "\n";
     }
+  }
+
+  // Wrap integer variable declarations with "ApeVar" or "ApeVarInit".
+  void process_int_var_decl(const MatchFinder::MatchResult& mresult) {
+    process_var_decl(mresult, StringRef("int-decl"), std::string("Int"));
+  }
+
+  // Wrap floating-point variable declarations with "ApeVar" or "ApeVarInit".
+  void process_float_var_decl(const MatchFinder::MatchResult& mresult) {
+    process_var_decl(mresult, StringRef("float-decl"), std::string("Approx"));
   }
 
   // Wrap integer literals with "IntConst".
@@ -144,17 +158,24 @@ public:
     mfinder.addMatcher(floatLiteral().bind("float-lit"), this);
     mfinder.addMatcher(varDecl(hasType(isInteger()),
                                unless(hasInitializer(expr().bind("rhs"))))
-                       .bind("decl"), this);
+                       .bind("int-decl"), this);
     mfinder.addMatcher(varDecl(hasType(isInteger()),
                                hasInitializer(expr().bind("rhs")))
-                       .bind("decl"), this);
+                       .bind("int-decl"), this);
+    mfinder.addMatcher(varDecl(hasType(realFloatingPointType()),
+                               unless(hasInitializer(expr().bind("rhs"))))
+                       .bind("float-decl"), this);
+    mfinder.addMatcher(varDecl(hasType(realFloatingPointType()),
+                               hasInitializer(expr().bind("rhs")))
+                       .bind("float-decl"), this);
   }
 
   // Process all of our matches.
   virtual void run(const MatchFinder::MatchResult& mresult) {
     process_integer_literal(mresult);
     process_float_literal(mresult);
-    process_integer_decl(mresult);
+    process_int_var_decl(mresult);
+    process_float_var_decl(mresult);
   }
 };
 
