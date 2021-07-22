@@ -36,12 +36,18 @@ private:
   // List of replacements to make.
   repl_map_t& replacements;
 
+  // Return the end of the last token in a source range.
+  SourceLocation get_end_of_end(SourceManager& sm, SourceRange& sr) {
+    SourceLocation end_tok_begin(sr.getEnd());
+    LangOptions lopt;
+    SourceLocation end_tok_end(Lexer::getLocForEndOfToken(end_tok_begin, 0, sm, lopt));
+    return end_tok_end;
+  }
+
   // Return the text corresponding to a source range.
   std::string get_text(SourceManager& sm, SourceRange& sr) {
     SourceLocation ofs0(sr.getBegin());
-    SourceLocation ofs1_begin(sr.getEnd());
-    LangOptions lopt;
-    SourceLocation ofs1(Lexer::getLocForEndOfToken(ofs1_begin, 0, sm, lopt));
+    SourceLocation ofs1(get_end_of_end(sm, sr));
     const char* ptr0(sm.getCharacterData(ofs0));
     const char* ptr1(sm.getCharacterData(ofs1));
     return std::string(ptr0, ptr1);
@@ -72,19 +78,30 @@ private:
 
     // Generate a replacement either with or without an initializer.
     const Expr* rhs = mresult.Nodes.getNodeAs<Expr>("rhs");
-    Replacement rep;
-    if (rhs == nullptr)
-      rep = Replacement(sm, ofs0, text.length(),
-                        "ApeVar(" + var_name + ", Int)");
-    else {
-      SourceRange rhs_sr(rhs->getSourceRange());
-      std::string rhs_text(get_text(sm, rhs_sr));
-      rep = Replacement(sm, ofs0, text.length(),
-                        "ApeVarInit(" + var_name + ", Int, " + rhs_text + ")");
-    }
     std::string fname(sm.getFilename(ofs0).str());
-    if (replacements[fname].add(rep))
-      llvm::errs() << "failed to perform replacement: " << rep.toString() << "\n";
+    if (rhs == nullptr) {
+      // No initializer.
+      Replacement rep(sm, ofs0, text.length(), "ApeVar(" + var_name + ", Int)");
+      if (replacements[fname].add(rep))
+        llvm::errs() << "failed to perform replacement: " << rep.toString() << "\n";
+    }
+    else {
+      // Initializer.  The trick here is not to replace the initializer itself,
+      // or Clang will complain about overlapping replacements.  We therefore
+      // replace only the text appearing either before or after the
+      // initializer.
+      const char* ptr0(sm.getCharacterData(ofs0));
+      SourceRange rhs_sr(rhs->getSourceRange());
+      SourceLocation rhs_ofs0(rhs_sr.getBegin());
+      const char* rhs_ptr0(sm.getCharacterData(rhs_ofs0));
+      Replacement rep1(sm, ofs0, rhs_ptr0 - ptr0, "ApeVarInit(" + var_name + ", Int, ");
+      if (replacements[fname].add(rep1))
+        llvm::errs() << "failed to perform replacement: " << rep1.toString() << "\n";
+      SourceLocation ofs1(get_end_of_end(sm, sr));
+      Replacement rep2(sm, ofs1, 0, ")");
+      if (replacements[fname].add(rep2))
+        llvm::errs() << "failed to perform replacement: " << rep2.toString() << "\n";
+    }
   }
 
   // Wrap integer literals with "IntConst".
