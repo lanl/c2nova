@@ -77,6 +77,20 @@ private:
     SourceLocation ofs0(sr.getBegin());
     std::string text(get_text(sm, sr));
 
+    // Look for magic comments to control allocation.
+    StringRef where("Ape");
+    StringRef what("Var");
+    ASTContext& ctx = decl->getASTContext();
+    const RawComment* raw_cmt = ctx.getRawCommentForDeclNoCache(decl);
+    if (raw_cmt != nullptr) {
+      StringRef comment = raw_cmt->getRawText(sm);
+      if (comment.contains("[CU]"))
+        where = StringRef("CU");
+      if (comment.contains("[mem]"))
+        what = StringRef("Mem");
+    }
+    std::string declare(std::string("Declare") + where.str() + what.str());
+
     // Extract the variable name.
     std::string var_name(get_ident(sm, decl->getLocation()));
 
@@ -85,7 +99,7 @@ private:
     std::string fname(sm.getFilename(ofs0).str());
     if (rhs == nullptr) {
       // No initializer.
-      Replacement rep(sm, ofs0, text.length(), "DeclareApeVar(" + var_name + ", " + nova_type + ")");
+      Replacement rep(sm, ofs0, text.length(), declare + "(" + var_name + ", " + nova_type + ")");
       if (replacements[fname].add(rep))
         llvm::errs() << "failed to perform replacement: " << rep.toString() << "\n";
     }
@@ -98,7 +112,7 @@ private:
       SourceRange rhs_sr(rhs->getSourceRange());
       SourceLocation rhs_ofs0(rhs_sr.getBegin());
       const char* rhs_ptr0(sm.getCharacterData(rhs_ofs0));
-      Replacement rep1(sm, ofs0, rhs_ptr0 - ptr0, "DeclareApeVarInit(" + var_name + ", " + nova_type + ", ");
+      Replacement rep1(sm, ofs0, rhs_ptr0 - ptr0, declare + "Init(" + var_name + ", " + nova_type + ", ");
       if (replacements[fname].add(rep1))
         llvm::errs() << "failed to perform replacement: " << rep1.toString() << "\n";
       SourceLocation ofs1(get_end_of_end(sm, sr));
@@ -182,7 +196,8 @@ public:
 // As a user, I hate having to append "--" to the command line when running a
 // Clang tool.  If we don't see a "--", append it ourself.  Also append
 // "--language=c" in that case so Clang doesn't complain about our
-// extensionless working file.
+// extensionless working file and "-fparse-all-comments" so we can parse magic
+// comments.
 bool append_ddash(int argc, const char **argv) {
   // Return true if the command line already contains a double-dash.
   for (int i = 1; i < argc; i++)
@@ -190,12 +205,13 @@ bool append_ddash(int argc, const char **argv) {
       return true;
 
   // No double dash: append one and restart the program.
-  char **new_argv = new char *[argc + 3];
+  char **new_argv = new char *[argc + 4];
   for (int i = 0; i < argc; i++)
     new_argv[i] = strdup(argv[i]);
   new_argv[argc] = strdup("--");
   new_argv[argc + 1] = strdup("--language=c");
-  new_argv[argc + 2] = nullptr;
+  new_argv[argc + 2] = strdup("-fparse-all-comments");
+  new_argv[argc + 3] = nullptr;
   if (execvp(argv[0], new_argv) == -1)
     return false;
   return true; // We should never get here.
