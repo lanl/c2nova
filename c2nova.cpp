@@ -162,6 +162,44 @@ private:
       llvm::errs() << "failed to perform replacement: " << rep.toString() << "\n";
   }
 
+  // Use Cast to cast types.
+  void process_cast_expr(const MatchFinder::MatchResult& mresult) {
+    // Determine the type of cast.
+    const CastExpr* cast = mresult.Nodes.getNodeAs<CastExpr>("cast");
+    if (cast == nullptr)
+      return;
+    std::string cast_str;
+    switch (cast->getCastKind()) {
+    case CK_FloatingToIntegral:
+      cast_str = "Int";
+      break;
+    case CK_IntegralToFloating:
+      cast_str = "Approx";
+      break;
+    case CK_IntegralToBoolean:
+      cast_str = "Bool";
+      break;
+    default:
+      return;
+    }
+
+    // Perform the cast.  The trick here is to wrap the value to be cast by
+    // inserting text before and after it.  Otherwise, Clang would complain
+    // about overlapping replacements.
+    SourceManager& sm(mresult.Context->getSourceManager());
+    SourceRange sr(cast->getSourceRange());
+    SourceLocation ofs0(sr.getBegin());
+    std::string text(get_text(sm, sr));
+    std::string fname(sm.getFilename(ofs0).str());
+    Replacement rep1(sm, ofs0, 0,
+		     std::string("Cast(") + cast_str + ", ");
+    if (replacements[fname].add(rep1))
+      llvm::errs() << "failed to perform replacement: " << rep1.toString() << "\n";
+    Replacement rep2(sm, ofs0.getLocWithOffset(text.length()), 0, ")");
+    if (replacements[fname].add(rep2))
+      llvm::errs() << "failed to perform replacement: " << rep2.toString() << "\n";
+  }
+
 public:
   // Store the set of replacements we were given to modify.
   explicit C_to_Nova(repl_map_t& repls) : replacements(repls) {}
@@ -182,6 +220,7 @@ public:
     mfinder.addMatcher(varDecl(hasType(realFloatingPointType()),
                                hasInitializer(expr().bind("rhs")))
                        .bind("float-decl"), this);
+    mfinder.addMatcher(castExpr(unless(hasAncestor(forStmt()))).bind("cast"), this);
   }
 
   // Process all of our matches.
@@ -190,28 +229,30 @@ public:
     process_float_literal(mresult);
     process_int_var_decl(mresult);
     process_float_var_decl(mresult);
+    process_cast_expr(mresult);
   }
 };
 
 // As a user, I hate having to append "--" to the command line when running a
 // Clang tool.  If we don't see a "--", append it ourself.  Also append
 // "--language=c" in that case so Clang doesn't complain about our
-// extensionless working file and "-fparse-all-comments" so we can parse magic
-// comments.
-bool append_ddash(int argc, const char **argv) {
+// extensionless working file, "--std=c89" to prohibit newer features we don't
+// expect to see, and "-fparse-all-comments" so we can parse magic comments.
+bool append_options(int argc, const char **argv) {
   // Return true if the command line already contains a double-dash.
   for (int i = 1; i < argc; i++)
     if (std::string(argv[i]) == "--")
       return true;
 
   // No double dash: append one and restart the program.
-  char **new_argv = new char *[argc + 4];
+  char **new_argv = new char *[argc + 5];
   for (int i = 0; i < argc; i++)
     new_argv[i] = strdup(argv[i]);
   new_argv[argc] = strdup("--");
   new_argv[argc + 1] = strdup("--language=c");
-  new_argv[argc + 2] = strdup("-fparse-all-comments");
-  new_argv[argc + 3] = nullptr;
+  new_argv[argc + 2] = strdup("--std=c89");
+  new_argv[argc + 3] = strdup("-fparse-all-comments");
+  new_argv[argc + 4] = nullptr;
   if (execvp(argv[0], new_argv) == -1)
     return false;
   return true; // We should never get here.
@@ -248,7 +289,7 @@ void move_working_to_output(fs::path iname, fs::path wname, fs::path oname) {
 
 int main(int argc, const char **argv) {
   // Append a "--" to the command line if none is already present.
-  if (!append_ddash(argc, argv)) {
+  if (!append_options(argc, argv)) {
     llvm::errs() << "failed to restart " << argv[0] << "("
                  << std::strerror(errno) << ")\n";
     return 1;
