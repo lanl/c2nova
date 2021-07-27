@@ -168,8 +168,8 @@ public:
 
   // Add a set of matchers to a finder.
   void add_matchers(MatchFinder& mfinder) {
-    mfinder.addMatcher(integerLiteral().bind("int-lit"), this);
-    mfinder.addMatcher(floatLiteral().bind("float-lit"), this);
+    mfinder.addMatcher(integerLiteral(unless(hasAncestor(forStmt()))).bind("int-lit"), this);
+    mfinder.addMatcher(floatLiteral(unless(hasAncestor(forStmt()))).bind("float-lit"), this);
     mfinder.addMatcher(varDecl(hasType(isInteger()),
                                unless(hasInitializer(expr().bind("rhs"))))
                        .bind("int-decl"), this);
