@@ -62,6 +62,21 @@ private:
     return std::string(ptr0, ptr1);
   }
 
+  // Insert text before and after a given match.
+  void insert_before_and_after(SourceManager& sm, SourceRange& sr,
+			       const std::string& before_text,
+			       const std::string& after_text) {
+    SourceLocation ofs0(sr.getBegin());
+    std::string text(get_text(sm, sr));
+    std::string fname(sm.getFilename(ofs0).str());
+    Replacement rep1(sm, ofs0, 0, before_text);
+    if (replacements[fname].add(rep1))
+      llvm::errs() << "failed to perform replacement: " << rep1.toString() << "\n";
+    Replacement rep2(sm, ofs0.getLocWithOffset(text.length()), 0, after_text);
+    if (replacements[fname].add(rep2))
+      llvm::errs() << "failed to perform replacement: " << rep2.toString() << "\n";
+  }
+
   // Wrap integer/float variable declarations with "DeclareApeVar" or
   // "DeclareApeVarInit", as appropriate.  This serves a helper function for
   // process_integer_decl() and process_float_decl().
@@ -139,12 +154,7 @@ private:
       return;
     SourceManager& sm(mresult.Context->getSourceManager());
     SourceRange sr(intLit->getSourceRange());
-    SourceLocation ofs0(sr.getBegin());
-    std::string text(get_text(sm, sr));
-    Replacement rep(sm, ofs0, text.length(), "IntConst(" + text + ")");
-    std::string fname(sm.getFilename(ofs0).str());
-    if (replacements[fname].add(rep))
-      llvm::errs() << "failed to perform replacement: " << rep.toString() << "\n";
+    insert_before_and_after(sm, sr, "IntConst(", ")");
   }
 
   // Wrap floating-point literals with "AConst".
@@ -154,12 +164,7 @@ private:
       return;
     SourceManager& sm(mresult.Context->getSourceManager());
     SourceRange sr(floatLit->getSourceRange());
-    SourceLocation ofs0(sr.getBegin());
-    std::string text(get_text(sm, sr));
-    Replacement rep(sm, ofs0, text.length(), "Aconst(" + text + ")");
-    std::string fname(sm.getFilename(ofs0).str());
-    if (replacements[fname].add(rep))
-      llvm::errs() << "failed to perform replacement: " << rep.toString() << "\n";
+    insert_before_and_after(sm, sr, "AConst(", ")");
   }
 
   // Use Cast to cast types.
@@ -183,21 +188,10 @@ private:
       return;
     }
 
-    // Perform the cast.  The trick here is to wrap the value to be cast by
-    // inserting text before and after it.  Otherwise, Clang would complain
-    // about overlapping replacements.
+    // Perform the cast.
     SourceManager& sm(mresult.Context->getSourceManager());
     SourceRange sr(cast->getSourceRange());
-    SourceLocation ofs0(sr.getBegin());
-    std::string text(get_text(sm, sr));
-    std::string fname(sm.getFilename(ofs0).str());
-    Replacement rep1(sm, ofs0, 0,
-		     std::string("Cast(") + cast_str + ", ");
-    if (replacements[fname].add(rep1))
-      llvm::errs() << "failed to perform replacement: " << rep1.toString() << "\n";
-    Replacement rep2(sm, ofs0.getLocWithOffset(text.length()), 0, ")");
-    if (replacements[fname].add(rep2))
-      llvm::errs() << "failed to perform replacement: " << rep2.toString() << "\n";
+    insert_before_and_after(sm, sr, std::string("Cast(") + cast_str + ", ", ")");
   }
 
 public:
