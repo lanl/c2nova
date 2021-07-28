@@ -14,7 +14,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
-#include <unistd.h>
 
 using namespace clang;
 using namespace clang::ast_matchers;
@@ -64,8 +63,8 @@ private:
 
   // Insert text before and after a given match.
   void insert_before_and_after(SourceManager& sm, SourceRange& sr,
-			       const std::string& before_text,
-			       const std::string& after_text) {
+                               const std::string& before_text,
+                               const std::string& after_text) {
     SourceLocation ofs0(sr.getBegin());
     std::string text(get_text(sm, sr));
     std::string fname(sm.getFilename(ofs0).str());
@@ -232,24 +231,25 @@ public:
 // "--language=c" in that case so Clang doesn't complain about our
 // extensionless working file, "--std=c89" to prohibit newer features we don't
 // expect to see, and "-fparse-all-comments" so we can parse magic comments.
-bool append_options(int argc, const char **argv) {
-  // Return true if the command line already contains a double-dash.
+void append_options(int argc, const char** argv, int* new_argc, const char*** new_argv) {
+  // Return the command line unmodified if it already contains a double-dash.
   for (int i = 1; i < argc; i++)
-    if (std::string(argv[i]) == "--")
-      return true;
+    if (std::string(argv[i]) == "--") {
+      *new_argc = argc;
+      *new_argv = argv;
+      return;
+    }
 
-  // No double dash: append one and restart the program.
-  char **new_argv = new char *[argc + 5];
+  // No double dash: append one.
+  *new_argv = new const char* [argc + 5];
   for (int i = 0; i < argc; i++)
-    new_argv[i] = strdup(argv[i]);
-  new_argv[argc] = strdup("--");
-  new_argv[argc + 1] = strdup("--language=c");
-  new_argv[argc + 2] = strdup("--std=c89");
-  new_argv[argc + 3] = strdup("-fparse-all-comments");
-  new_argv[argc + 4] = nullptr;
-  if (execvp(argv[0], new_argv) == -1)
-    return false;
-  return true; // We should never get here.
+    (*new_argv)[i] = argv[i];
+  (*new_argv)[argc] = "--";
+  (*new_argv)[argc + 1] = "--language=c";
+  (*new_argv)[argc + 2] = "--std=c89";
+  (*new_argv)[argc + 3] = "-fparse-all-comments";
+  (*new_argv)[argc + 4] = nullptr;
+  *new_argc = argc + 4;
 }
 
 // Copy a file to a working file.  Return the name of the working file.
@@ -283,14 +283,12 @@ void move_working_to_output(fs::path iname, fs::path wname, fs::path oname) {
 
 int main(int argc, const char **argv) {
   // Append a "--" to the command line if none is already present.
-  if (!append_options(argc, argv)) {
-    llvm::errs() << "failed to restart " << argv[0] << "("
-                 << std::strerror(errno) << ")\n";
-    return 1;
-  }
+  int new_argc;
+  const char** new_argv;
+  append_options(argc, argv, &new_argc, &new_argv);
 
   // Parse the command line.
-  auto opt_parser = CommonOptionsParser::create(argc, argv, c2n_opts, cl::Required);
+  auto opt_parser = CommonOptionsParser::create(new_argc, new_argv, c2n_opts, cl::Required);
   if (!opt_parser) {
     llvm::errs() << opt_parser.takeError();
     return 1;
