@@ -4,7 +4,7 @@
 ###################################
 
 CXX = clang++
-CXXFLAGS = -g -std=c++17 -Wall
+CXXFLAGS = -g -Wall
 LLVM_CXXFLAGS = $(shell llvm-config --cxxflags)
 LLVM_LDFLAGS = $(shell llvm-config --ldflags --libs --system-libs)
 LIBS = \
@@ -13,17 +13,14 @@ LIBS = \
 	-lclangASTMatchers \
 	-lclangAST \
 	-lclangBasic \
-	-lclangToolingCore \
+	-lclangFrontend \
+	-lclangRewrite \
 	-lclangLex \
 	-lclangSerialization \
-	-lclangFrontend \
 	-lclangDriver \
-	-lclangRewrite \
-	-lclangFormat \
 	-lclangSema \
 	-lclangParse \
 	-lclangEdit \
-	-lclangToolingInclusions \
 	-lclangAnalysis \
 	-Wl,--end-group
 

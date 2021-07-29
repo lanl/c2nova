@@ -15,13 +15,11 @@
 #include <llvm/Support/CommandLine.h>
 #include <cstdio>
 #include <cstdlib>
-#include <filesystem>
 
 using namespace clang;
 using namespace clang::ast_matchers;
 using namespace clang::tooling;
 using namespace llvm;
-namespace fs = std::filesystem;
 
 // Prepare --help to output some helpful information.
 static llvm::cl::OptionCategory c2n_opts("cpp2nova options");
