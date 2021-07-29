@@ -193,27 +193,51 @@ private:
     insert_before_and_after(sm, sr, std::string("Cast(") + cast_str + ", ", ")");
   }
 
+  // Wrap each binary operator in a corresponding Nova macros.
+  void process_binary_operator(const MatchFinder::MatchResult& mresult) {
+    const BinaryOperator* binop = mresult.Nodes.getNodeAs<BinaryOperator>("bin-op");
+    if (binop == nullptr)
+      return;
+
+    // Temporary
+    llvm::outs() << "BINARY OPERATOR\n";
+  }
+
 public:
   // Store the set of replacements we were given to modify.
   explicit C_to_Nova(repl_map_t& repls) : replacements(repls) {}
 
   // Add a set of matchers to a finder.
   void add_matchers(MatchFinder& mfinder) {
+    // Variable declarations (int or float, with or without an initializer)
+    mfinder.addMatcher(varDecl(hasType(isInteger()),
+                               unless(hasInitializer(expr().bind("rhs"))))
+                       .bind("int-decl"), this);
+    mfinder.addMatcher(varDecl(hasType(isInteger()),
+                               hasInitializer(expr().bind("rhs")))
+                       .bind("int-decl"), this);
+    mfinder.addMatcher(varDecl(hasType(realFloatingPointType()),
+                               unless(hasInitializer(expr().bind("rhs"))))
+                       .bind("float-decl"), this);
+    mfinder.addMatcher(varDecl(hasType(realFloatingPointType()),
+                               hasInitializer(expr().bind("rhs")))
+                       .bind("float-decl"), this);
+
+    // Int and float literals, either not within a for loop or within the for
+    // loop's body.
     mfinder.addMatcher(integerLiteral(unless(hasAncestor(forStmt()))).bind("int-lit"), this);
     mfinder.addMatcher(floatLiteral(unless(hasAncestor(forStmt()))).bind("float-lit"), this);
-    mfinder.addMatcher(varDecl(hasType(isInteger()),
-                               unless(hasInitializer(expr().bind("rhs"))))
-                       .bind("int-decl"), this);
-    mfinder.addMatcher(varDecl(hasType(isInteger()),
-                               hasInitializer(expr().bind("rhs")))
-                       .bind("int-decl"), this);
-    mfinder.addMatcher(varDecl(hasType(realFloatingPointType()),
-                               unless(hasInitializer(expr().bind("rhs"))))
-                       .bind("float-decl"), this);
-    mfinder.addMatcher(varDecl(hasType(realFloatingPointType()),
-                               hasInitializer(expr().bind("rhs")))
-                       .bind("float-decl"), this);
+    mfinder.addMatcher(forStmt(hasBody(stmt(hasDescendant(integerLiteral().bind("int-lit"))))), this);
+    mfinder.addMatcher(forStmt(hasBody(stmt(hasDescendant(floatLiteral().bind("float-lit"))))), this);
+
+    // Type cast, either not within a for loop or within the for loop's body.
     mfinder.addMatcher(castExpr(unless(hasAncestor(forStmt()))).bind("cast"), this);
+    mfinder.addMatcher(forStmt(hasBody(stmt(hasDescendant(castExpr().bind("cast"))))), this);
+
+    // Binary operator, either not within a for loop or within the for loop's
+    // body.
+    mfinder.addMatcher(binaryOperator(unless(hasAncestor(forStmt()))).bind("bin-op"), this);
+    mfinder.addMatcher(forStmt(hasBody(stmt(hasDescendant(binaryOperator().bind("bin-op"))))), this);
   }
 
   // Process all of our matches.
@@ -223,6 +247,7 @@ public:
     process_int_var_decl(mresult);
     process_float_var_decl(mresult);
     process_cast_expr(mresult);
+    process_binary_operator(mresult);
   }
 };
 
