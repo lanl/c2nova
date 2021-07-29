@@ -225,21 +225,16 @@ public:
                                hasInitializer(expr().bind("rhs")))
                        .bind("float-decl"), this);
 
-    // Int and float literals, either not within a for loop or within the for
-    // loop's body.
-    mfinder.addMatcher(integerLiteral(unless(hasAncestor(forStmt()))).bind("int-lit"), this);
-    mfinder.addMatcher(floatLiteral(unless(hasAncestor(forStmt()))).bind("float-lit"), this);
-    mfinder.addMatcher(forStmt(hasBody(stmt(hasDescendant(integerLiteral().bind("int-lit"))))), this);
-    mfinder.addMatcher(forStmt(hasBody(stmt(hasDescendant(floatLiteral().bind("float-lit"))))), this);
+    // Int and float literals
+    mfinder.addMatcher(integerLiteral().bind("int-lit"), this);
+    mfinder.addMatcher(floatLiteral().bind("float-lit"), this);
 
-    // Type cast, either not within a for loop or within the for loop's body.
-    mfinder.addMatcher(castExpr(unless(hasAncestor(forStmt()))).bind("cast"), this);
-    mfinder.addMatcher(forStmt(hasBody(stmt(hasDescendant(castExpr().bind("cast"))))), this);
+    // Type cast
+    mfinder.addMatcher(castExpr().bind("cast"), this);
 
     // Binary operator, either not within a for loop or within the for loop's
     // body.
-    mfinder.addMatcher(binaryOperator(unless(hasAncestor(forStmt()))).bind("bin-op"), this);
-    mfinder.addMatcher(forStmt(hasBody(stmt(hasDescendant(binaryOperator().bind("bin-op"))))), this);
+    mfinder.addMatcher(binaryOperator().bind("bin-op"), this);
   }
 
   // Process all of our matches.
