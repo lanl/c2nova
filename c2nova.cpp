@@ -5,9 +5,11 @@
 
 #include <clang/ASTMatchers/ASTMatchFinder.h>
 #include <clang/ASTMatchers/ASTMatchers.h>
+#include <clang/Frontend/CompilerInstance.h>
 #include <clang/Frontend/FrontendActions.h>
+#include <clang/Rewrite/Core/Rewriter.h>
+#include <clang/Rewrite/Frontend/Rewriters.h>
 #include <clang/Tooling/CommonOptionsParser.h>
-#include <clang/Tooling/Core/Replacement.h>
 #include <clang/Tooling/Refactoring.h>
 #include <clang/Tooling/Tooling.h>
 #include <llvm/Support/CommandLine.h>
@@ -29,12 +31,6 @@ static cl::extrahelp CommonHelp(CommonOptionsParser::HelpMessage);
 // Match various operations and convert these to Nova.
 class C_to_Nova : public clang::ast_matchers::MatchFinder::MatchCallback {
 private:
-  // Define some shorthand for a map from filename to replacement list.
-  using repl_map_t = std::map<std::string, clang::tooling::Replacements>;
-
-  // List of replacements to make.
-  repl_map_t& replacements;
-
   // Return the end of the last token in a source range.
   SourceLocation get_end_of_end(SourceManager& sm, SourceRange& sr) {
     SourceLocation end_tok_begin(sr.getEnd());
@@ -67,13 +63,9 @@ private:
                                const std::string& after_text) {
     SourceLocation ofs0(sr.getBegin());
     std::string text(get_text(sm, sr));
-    std::string fname(sm.getFilename(ofs0).str());
-    Replacement rep1(sm, ofs0, 0, before_text);
-    if (replacements[fname].add(rep1))
-      llvm::errs() << "failed to perform replacement: " << rep1.toString() << "\n";
-    Replacement rep2(sm, ofs0.getLocWithOffset(text.length()), 0, after_text);
-    if (replacements[fname].add(rep2))
-      llvm::errs() << "failed to perform replacement: " << rep2.toString() << "\n";
+    prepare_rewriter(sm);
+    rewriter->InsertTextBefore(ofs0, before_text);
+    rewriter->InsertTextAfter(ofs0.getLocWithOffset(text.length()), after_text);
   }
 
   // Wrap integer/float variable declarations with "DeclareApeVar" or
@@ -111,28 +103,19 @@ private:
     // Generate a replacement either with or without an initializer.
     const Expr* rhs = mresult.Nodes.getNodeAs<Expr>("rhs");
     std::string fname(sm.getFilename(ofs0).str());
-    if (rhs == nullptr) {
+    prepare_rewriter(sm);
+    if (rhs == nullptr)
       // No initializer.
-      Replacement rep(sm, ofs0, text.length(), declare + "(" + var_name + ", " + nova_type + ")");
-      if (replacements[fname].add(rep))
-        llvm::errs() << "failed to perform replacement: " << rep.toString() << "\n";
-    }
+      rewriter->ReplaceText(ofs0, text.length(), declare + "Init(" + var_name + ", " + nova_type + ")");
     else {
-      // Initializer.  The trick here is not to replace the initializer itself,
-      // or Clang will complain about overlapping replacements.  We therefore
-      // replace only the text appearing either before or after the
-      // initializer.
+      // Initializer.
       const char* ptr0(sm.getCharacterData(ofs0));
       SourceRange rhs_sr(rhs->getSourceRange());
       SourceLocation rhs_ofs0(rhs_sr.getBegin());
       const char* rhs_ptr0(sm.getCharacterData(rhs_ofs0));
-      Replacement rep1(sm, ofs0, rhs_ptr0 - ptr0, declare + "Init(" + var_name + ", " + nova_type + ", ");
-      if (replacements[fname].add(rep1))
-        llvm::errs() << "failed to perform replacement: " << rep1.toString() << "\n";
+      rewriter->ReplaceText(ofs0, rhs_ptr0 - ptr0, declare + "Init(" + var_name + ", " + nova_type + ", ");
       SourceLocation ofs1(get_end_of_end(sm, sr));
-      Replacement rep2(sm, ofs1, 0, ")");
-      if (replacements[fname].add(rep2))
-        llvm::errs() << "failed to perform replacement: " << rep2.toString() << "\n";
+      rewriter->InsertTextAfter(ofs1, ")");
     }
   }
 
@@ -199,13 +182,34 @@ private:
     if (binop == nullptr)
       return;
 
-    // Temporary
-    llvm::outs() << "BINARY OPERATOR\n";
+    // TODO: Put code here.
+  }
+
+  // Initialize the rewriter if we haven't already.
+  void prepare_rewriter(SourceManager& sm) {
+    if (rewriter != nullptr)
+      return;
+    CompilerInstance comp_inst;
+    rewriter = new Rewriter();
+    rewriter->setSourceMgr(sm, comp_inst.getLangOpts());
   }
 
 public:
-  // Store the set of replacements we were given to modify.
-  explicit C_to_Nova(repl_map_t& repls) : replacements(repls) {}
+  // Provide a do-nothing constructor.
+  explicit C_to_Nova() {}
+
+  // Return a modified source file as a string.
+  std::string get_modifications() {
+    if (rewriter == nullptr)
+      return "";
+    SourceManager& sm = rewriter->getSourceMgr();
+    const RewriteBuffer *buf =
+      rewriter->getRewriteBufferFor(sm.getMainFileID());
+    return std::string(buf->begin(), buf->end());
+  }
+
+  // Rewriter to use for modifying the source code.
+  Rewriter* rewriter = nullptr;
 
   // Add a set of matchers to a finder.
   void add_matchers(MatchFinder& mfinder) {
@@ -277,35 +281,6 @@ void append_options(int argc, const char** argv, int* new_argc, const char*** ne
   *new_argc = argc + 4;
 }
 
-// Copy a file to a working file.  Return the name of the working file.
-std::string copy_input_to_working(std::string iname) {
-  // Create a working file with a random name.
-  std::string tmpl_str(fs::temp_directory_path().append("c2nova-XXXXXX"));
-  char* tmpl = strdup(tmpl_str.c_str());
-  if (mkstemp(tmpl) == -1) {
-    llvm::errs() << "failed to create a file from template " << tmpl << "\n";
-    std::exit(1);
-  }
-
-  // Overwrite the working file with the input file.
-  fs::path oname = fs::path(tmpl);
-  fs::copy_file(iname, oname, fs::copy_options::overwrite_existing);
-  return std::string(oname);
-}
-
-// Move the working file to the output file.
-void move_working_to_output(fs::path iname, fs::path wname, fs::path oname) {
-  // If the output name is empty, assign it a name derived from the input name.
-  if (oname == "") {
-    oname = fs::path(iname).replace_extension(".nova");
-    if (oname == iname)
-      oname += ".c";   // Don't implicitly overwrite the input file.
-  }
-
-  // Rename the working file to the output file.
-  fs::rename(wname, oname);
-}
-
 int main(int argc, const char **argv) {
   // Append a "--" to the command line if none is already present.
   int new_argc;
@@ -319,23 +294,18 @@ int main(int argc, const char **argv) {
     return 1;
   }
 
-  // Copy the input file to a working file so we can modify it in place.
-  std::string iname(opt_parser->getSourcePathList()[0]);
-  std::string wname = copy_input_to_working(iname);
-  std::vector<std::string> sources(1, wname);
-
   // Instantiate and prepare our Clang tool.
-  RefactoringTool tool(opt_parser->getCompilations(), sources);
-  C_to_Nova c2n(tool.getReplacements());
+  ClangTool tool(opt_parser->getCompilations(), opt_parser->getSourcePathList());
+  C_to_Nova c2n;
   MatchFinder mfinder;
   c2n.add_matchers(mfinder);
 
   // Run our Clang tool.
-  int run_result = tool.runAndSave(newFrontendActionFactory(&mfinder).get());
+  int run_result = tool.run(newFrontendActionFactory(&mfinder).get());
   if (run_result != 0)
     return run_result;
 
-  // Move the working file to the output file.
-  move_working_to_output(iname, wname, fs::path(std::string(outfile)));
+  // Output the modified source code.
+  llvm::outs() << c2n.get_modifications();
   return 0;
 }
