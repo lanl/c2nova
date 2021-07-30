@@ -29,8 +29,29 @@ static cl::extrahelp CommonHelp(CommonOptionsParser::HelpMessage);
 // Match various operations and convert these to Nova.
 class C_to_Nova : public clang::ast_matchers::MatchFinder::MatchCallback {
 private:
+  // Redirect source locations corresponding to macro expansions from the macro
+  // definition to the macro use.
+  SourceLocation fix_sl(SourceManager& sm, SourceLocation sl) {
+    if (sl.isMacroID()) {
+      CharSourceRange csl(sm.getImmediateExpansionRange(sl));
+      return csl.getBegin();
+    }
+    else
+      return sl;
+  }
+
+  // Apply fix_sl to both the beginning and ending locations in a source range.
+  SourceRange fix_sr(SourceManager& sm, SourceRange sr) {
+    return SourceRange(fix_sl(sm, sr.getBegin()), fix_sl(sm, sr.getEnd()));
+  }
+
+  // Apply fix_sl to two source locations, returning a source range.
+  SourceRange fix_sr(SourceManager& sm, SourceLocation sl0, SourceLocation sl1) {
+    return SourceRange(fix_sl(sm, sl0), fix_sl(sm, sl1));
+  }
+
   // Return the end of the last token in a source range.
-  SourceLocation get_end_of_end(SourceManager& sm, SourceRange& sr) {
+  SourceLocation get_end_of_end(SourceManager& sm, SourceRange sr) {
     SourceLocation end_tok_begin(sr.getEnd());
     LangOptions lopt;
     SourceLocation end_tok_end(Lexer::getLocForEndOfToken(end_tok_begin, 0, sm, lopt));
@@ -38,7 +59,7 @@ private:
   }
 
   // Return the end of a token in a source location.
-  SourceLocation get_end_of_end(SourceManager& sm, SourceLocation& sl) {
+  SourceLocation get_end_of_end(SourceManager& sm, SourceLocation sl) {
     LangOptions lopt;
     SourceLocation end_tok_end(Lexer::getLocForEndOfToken(sl, 0, sm, lopt));
     return end_tok_end;
@@ -52,6 +73,16 @@ private:
       return std::string("[c2nova:INVALID]"); // I don't know what causes this.
     const char* ptr0(sm.getCharacterData(ofs0));
     const char* ptr1(sm.getCharacterData(ofs1));
+    return std::string(ptr0, ptr1);
+  }
+
+  // Return the text corresponding to a token at a source location.
+  std::string get_text(SourceManager& sm, SourceLocation& sl) {
+    SourceLocation sl_end(get_end_of_end(sm, sl));
+    if (sl.isInvalid() || sl_end.isInvalid())
+      return std::string("[c2nova:INVALID]"); // I don't know what causes this.
+    const char* ptr0(sm.getCharacterData(sl));
+    const char* ptr1(sm.getCharacterData(sl_end));
     return std::string(ptr0, ptr1);
   }
 
@@ -88,7 +119,7 @@ private:
     if (decl == nullptr)
       return;
     SourceManager& sm(mresult.Context->getSourceManager());
-    SourceRange sr(decl->getSourceRange());
+    SourceRange sr(fix_sr(sm, decl->getSourceRange()));
     SourceLocation ofs0(sr.getBegin());
     std::string text(get_text(sm, sr));
 
@@ -119,7 +150,7 @@ private:
     else {
       // Initializer.
       const char* ptr0(sm.getCharacterData(ofs0));
-      SourceRange rhs_sr(rhs->getSourceRange());
+      SourceRange rhs_sr(fix_sr(sm, rhs->getSourceRange()));
       SourceLocation rhs_ofs0(rhs_sr.getBegin());
       const char* rhs_ptr0(sm.getCharacterData(rhs_ofs0));
       rewriter->ReplaceText(ofs0, rhs_ptr0 - ptr0, declare + "Init(" + var_name + ", " + nova_type + ", ");
@@ -128,12 +159,14 @@ private:
     }
   }
 
-  // Wrap integer variable declarations with "DeclareApeVar" or "DeclareApeVarInit".
+  // Wrap integer variable declarations with "DeclareApeVar" or
+  // "DeclareApeVarInit".
   void process_int_var_decl(const MatchFinder::MatchResult& mresult) {
     process_var_decl(mresult, StringRef("int-decl"), std::string("Int"));
   }
 
-  // Wrap floating-point variable declarations with "DeclareApeVar" or "DeclareApeVarInit".
+  // Wrap floating-point variable declarations with "DeclareApeVar" or
+  // "DeclareApeVarInit".
   void process_float_var_decl(const MatchFinder::MatchResult& mresult) {
     process_var_decl(mresult, StringRef("float-decl"), std::string("Approx"));
   }
@@ -144,7 +177,7 @@ private:
     if (intLit == nullptr)
       return;
     SourceManager& sm(mresult.Context->getSourceManager());
-    SourceRange sr(intLit->getSourceRange());
+    SourceRange sr(fix_sr(sm, intLit->getSourceRange()));
     insert_before_and_after(sm, sr, "IntConst(", ")");
   }
 
@@ -154,7 +187,7 @@ private:
     if (floatLit == nullptr)
       return;
     SourceManager& sm(mresult.Context->getSourceManager());
-    SourceRange sr(floatLit->getSourceRange());
+    SourceRange sr(fix_sr(sm, floatLit->getSourceRange()));
     insert_before_and_after(sm, sr, "AConst(", ")");
   }
 
@@ -181,7 +214,7 @@ private:
 
     // Perform the cast.
     SourceManager& sm(mresult.Context->getSourceManager());
-    SourceRange sr(cast->getSourceRange());
+    SourceRange sr(fix_sr(sm, cast->getSourceRange()));
     insert_before_and_after(sm, sr, std::string("Cast(") + cast_str + ", ", ")");
   }
 
@@ -234,22 +267,13 @@ private:
     // Remove the operator.
     SourceManager& sm(mresult.Context->getSourceManager());
     prepare_rewriter(sm);
-    SourceLocation op_begin = unop->getOperatorLoc();
-    SourceLocation op_end;
-    if (unop->isPostfix()) {
-      SourceRange op_sr(op_begin, unop->getEndLoc());
-      op_end = get_end_of_end(sm, op_sr);
-    }
-    else
-      op_end = arg->getBeginLoc();
-    const char* ptr0(sm.getCharacterData(op_begin));
-    const char* ptr1(sm.getCharacterData(op_end));
-    size_t op_len = ptr1 - ptr0;
-    rewriter->RemoveText(op_begin, op_len);
+    SourceLocation op_begin = fix_sl(sm, unop->getOperatorLoc());
+    std::string op_text(get_text(sm, op_begin));
+    rewriter->RemoveText(op_begin, op_text.size());
 
     // Specially handle increment and decrement operators by converting them to
     // Set statements.
-    SourceRange arg_sr(arg->getBeginLoc(), arg->getEndLoc());
+    SourceRange arg_sr(fix_sr(sm, arg->getSourceRange()));
     std::string before_text(mname + "(");
     if (inc_dec != "") {
       std::string arg_text(get_text(sm, arg_sr));
@@ -333,8 +357,8 @@ private:
     // Change the operator to a comma.
     SourceManager& sm(mresult.Context->getSourceManager());
     prepare_rewriter(sm);
-    SourceLocation op_loc = binop->getOperatorLoc();
-    StringRef op_text = binop->getOpcodeStr();
+    SourceLocation op_loc = fix_sl(sm, binop->getOperatorLoc());
+    std::string op_text(get_text(sm, op_loc));
     rewriter->ReplaceText(op_loc, op_text.size(), ",");
 
     // Expand compound operators (e.g., "a *= b" becomes "Set(a, Mul(a, b))").
@@ -342,14 +366,14 @@ private:
     std::string after_text(")");
     if (binop->isCompoundAssignmentOp()) {
       Expr* lhs = binop->getLHS();
-      SourceRange sr(lhs->getSourceRange());
+      SourceRange sr(fix_sr(sm, lhs->getSourceRange()));
       std::string lhs_text(get_text(sm, sr));
       before_text = std::string("Set(") + lhs_text + ", " + before_text;
       after_text += ")";
     }
 
     // Wrap the entire operation in a Nova macro.
-    SourceRange sr(binop->getBeginLoc(), binop->getEndLoc());
+    SourceRange sr(fix_sr(sm, binop->getSourceRange()));
     insert_before_and_after(sm, sr, before_text, after_text);
   }
 
@@ -361,7 +385,7 @@ private:
     SourceManager& sm(mresult.Context->getSourceManager());
     prepare_rewriter(sm);
     const Expr* callee = call->getCallee();
-    SourceRange sr(callee->getSourceRange());
+    SourceRange sr(fix_sr(sm, callee->getSourceRange()));
     std::string callee_name = get_text(sm, sr);
     if (callee_name == "sqrt")
       rewriter->ReplaceText(sr.getBegin(), 4, "Sqrt");
@@ -377,8 +401,7 @@ private:
     if (if_stmt == nullptr)
       return;
     SourceManager& sm(mresult.Context->getSourceManager());
-    FullSourceLoc if_begin = FullSourceLoc(if_stmt->getIfLoc(), sm).getExpansionLoc();
-    SourceRange if_sr(if_begin, if_stmt->getLParenLoc().getLocWithOffset(-1));
+    SourceRange if_sr(fix_sr(sm, if_stmt->getIfLoc(), if_stmt->getLParenLoc().getLocWithOffset(-1)));
     std::string if_text(get_text(sm, if_sr));
     std::string if_name("ApeIf");
     std::string else_name("ApeElse()");
@@ -394,7 +417,7 @@ private:
     rewriter->ReplaceText(if_sr, if_name);
 
     // Replace "else", if present.
-    FullSourceLoc else_begin = FullSourceLoc(if_stmt->getElseLoc(), sm).getExpansionLoc();
+    SourceLocation else_begin(fix_sl(sm, if_stmt->getElseLoc()));
     if (else_begin.isValid()) {
       SourceLocation else_end(get_end_of_end(sm, else_begin));
       SourceRange else_sr(else_begin, else_end);
@@ -402,7 +425,7 @@ private:
     }
 
     // Insert "fi" at the end of the statement.
-    SourceLocation end_loc(if_stmt->getEndLoc());
+    SourceLocation end_loc(fix_sl(sm, if_stmt->getEndLoc()));
     SourceLocation fi_loc(get_end_of_end(sm, end_loc));
     rewriter->InsertTextAfterToken(fi_loc, fi_name);
   }
