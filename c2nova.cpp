@@ -184,13 +184,30 @@ private:
     const UnaryOperator* unop = mresult.Nodes.getNodeAs<UnaryOperator>("un-op");
     if (unop == nullptr)
       return;
+    const Expr* arg = unop->getSubExpr();
+    const clang::Type& arg_type = *arg->getType();
     std::string mname;
+    std::string after_text(")");
     switch (unop->getOpcode()) {
     case UO_LNot:
       mname = "Not";
       break;
     case UO_Plus:
       mname = "";
+      break;
+    case UO_Minus:
+      // Nova doesn't appear to have a unary minus so we have to convert to a
+      // binary operation.
+      if (arg_type.isIntegerType()) {
+        mname = "Sub(IntConst(0), ";
+        after_text += ')';
+      }
+      else if (arg_type.isFloatingType()) {
+        mname = "Sub(AConst(0.0), ";
+        after_text += ')';
+      }
+      else
+        return;
       break;
     default:
       return;  // Unknown operator
@@ -200,7 +217,7 @@ private:
     SourceManager& sm(mresult.Context->getSourceManager());
     prepare_rewriter(sm);
     SourceLocation op_begin = unop->getOperatorLoc();
-    SourceLocation arg_begin = unop->getSubExpr()->getBeginLoc();
+    SourceLocation arg_begin = arg->getBeginLoc();
     const char* ptr0(sm.getCharacterData(op_begin));
     const char* ptr1(sm.getCharacterData(arg_begin));
     size_t op_len = ptr1 - ptr0;
@@ -208,8 +225,6 @@ private:
 
     // Wrap the operator's argument in a Nova macro plus parentheses.
     std::string before_text(mname + "(");
-    std::string after_text(")");
-    const Expr* arg = unop->getSubExpr();
     SourceRange arg_sr(arg->getBeginLoc(), arg->getEndLoc());
     insert_before_and_after(sm, arg_sr, before_text, after_text);
   }
