@@ -185,6 +185,13 @@ private:
     case BO_Add:
       mname = "Add";
       break;
+    case BO_Assign:
+      mname = "Set";
+      break;
+    case BO_Mul:
+    case BO_MulAssign:
+      mname = "Mul";
+      break;
     default:
       return;  // Unknown operator
     }
@@ -196,9 +203,20 @@ private:
     StringRef op_text = binop->getOpcodeStr();
     rewriter->ReplaceText(op_loc, op_text.size(), ",");
 
+    // Expand compound operators (e.g., "a *= b" becomes "Set(a, Mul(a, b))").
+    std::string before_text(mname + "(");
+    std::string after_text(")");
+    if (binop->isCompoundAssignmentOp()) {
+      Expr* lhs = binop->getLHS();
+      SourceRange sr(lhs->getSourceRange());
+      std::string lhs_text(get_text(sm, sr));
+      before_text = std::string("Set(") + lhs_text + ", " + before_text;
+      after_text += ")";
+    }
+
     // Wrap the entire operation in a Nova macro.
     SourceRange sr(binop->getBeginLoc(), binop->getEndLoc());
-    insert_before_and_after(sm, sr, mname + "(", ")");
+    insert_before_and_after(sm, sr, before_text, after_text);
   }
 
   // Initialize the rewriter if we haven't already.
