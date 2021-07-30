@@ -178,6 +178,42 @@ private:
     insert_before_and_after(sm, sr, std::string("Cast(") + cast_str + ", ", ")");
   }
 
+  // Replace each unary operator with a corresponding Nova macro.
+  void process_unary_operator(const MatchFinder::MatchResult& mresult) {
+    // Map a Clang operator to a Nova macro name.
+    const UnaryOperator* unop = mresult.Nodes.getNodeAs<UnaryOperator>("un-op");
+    if (unop == nullptr)
+      return;
+    std::string mname;
+    switch (unop->getOpcode()) {
+    case UO_LNot:
+      mname = "Not";
+      break;
+    case UO_Plus:
+      mname = "";
+      break;
+    default:
+      return;  // Unknown operator
+    }
+
+    // Remove the operator.
+    SourceManager& sm(mresult.Context->getSourceManager());
+    prepare_rewriter(sm);
+    SourceLocation op_begin = unop->getOperatorLoc();
+    SourceLocation arg_begin = unop->getSubExpr()->getBeginLoc();
+    const char* ptr0(sm.getCharacterData(op_begin));
+    const char* ptr1(sm.getCharacterData(arg_begin));
+    size_t op_len = ptr1 - ptr0;
+    rewriter->RemoveText(op_begin, op_len);
+
+    // Wrap the operator's argument in a Nova macro plus parentheses.
+    std::string before_text(mname + "(");
+    std::string after_text(")");
+    const Expr* arg = unop->getSubExpr();
+    SourceRange arg_sr(arg->getBeginLoc(), arg->getEndLoc());
+    insert_before_and_after(sm, arg_sr, before_text, after_text);
+  }
+
   // Wrap each binary operator in a corresponding Nova macros.
   void process_binary_operator(const MatchFinder::MatchResult& mresult) {
     // Map a Clang operator to a Nova macro name.
@@ -333,8 +369,10 @@ public:
     // Type cast
     mfinder.addMatcher(castExpr().bind("cast"), this);
 
-    // Binary operator, either not within a for loop or within the for loop's
-    // body.
+    // Unary operator
+    mfinder.addMatcher(unaryOperator().bind("un-op"), this);
+
+    // Binary operator
     mfinder.addMatcher(binaryOperator().bind("bin-op"), this);
 
     // Function call
@@ -348,6 +386,7 @@ public:
     process_int_var_decl(mresult);
     process_float_var_decl(mresult);
     process_cast_expr(mresult);
+    process_unary_operator(mresult);
     process_binary_operator(mresult);
     process_function_call(mresult);
   }
