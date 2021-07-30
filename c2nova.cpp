@@ -186,24 +186,63 @@ private:
       return;
     std::string mname;
     switch (binop->getOpcode()) {
-    case BO_Div:
-    case BO_DivAssign:
-      mname = "Div";
-      break;
+      // Arithmetic operators (number op number -> number)
     case BO_Add:
     case BO_AddAssign:
       mname = "Add";
       break;
-    case BO_Assign:
-      mname = "Set";
+    case BO_Div:
+    case BO_DivAssign:
+      mname = "Div";
       break;
     case BO_Mul:
     case BO_MulAssign:
       mname = "Mul";
       break;
+    case BO_Shl:
+    case BO_ShlAssign:
+      mname = "Asl";
+      break;
+    case BO_Shr:
+    case BO_ShrAssign:
+      mname = "Asr";
+      break;
     case BO_Sub:
     case BO_SubAssign:
       mname = "Sub";
+      break;
+
+      // Logical operators (Boolean op Boolean -> Boolean)
+    case BO_LAnd:
+      mname = "And";
+      break;
+    case BO_LOr:
+      mname = "Or";
+      break;
+
+      // Relational operators (number op number -> Boolean)
+    case BO_EQ:
+      mname = "Eq";
+      break;
+    case BO_NE:
+      mname = "Ne";
+      break;
+    case BO_LT:
+      mname = "Lt";
+      break;
+    case BO_LE:
+      mname = "Le";
+      break;
+    case BO_GT:
+      mname = "Gt";
+      break;
+    case BO_GE:
+      mname = "Ge";
+      break;
+
+      // Other operators
+    case BO_Assign:
+      mname = "Set";
       break;
     default:
       return;  // Unknown operator
