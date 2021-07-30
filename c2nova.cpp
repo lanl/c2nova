@@ -37,6 +37,13 @@ private:
     return end_tok_end;
   }
 
+  // Return the end of a token in a source location.
+  SourceLocation get_end_of_end(SourceManager& sm, SourceLocation& sl) {
+    LangOptions lopt;
+    SourceLocation end_tok_end(Lexer::getLocForEndOfToken(sl, 0, sm, lopt));
+    return end_tok_end;
+  }
+
   // Return the text corresponding to a source range.
   std::string get_text(SourceManager& sm, SourceRange& sr) {
     SourceLocation ofs0(sr.getBegin());
@@ -352,11 +359,52 @@ private:
     if (call == nullptr)
       return;
     SourceManager& sm(mresult.Context->getSourceManager());
+    prepare_rewriter(sm);
     const Expr* callee = call->getCallee();
     SourceRange sr(callee->getSourceRange());
     std::string callee_name = get_text(sm, sr);
     if (callee_name == "sqrt")
       rewriter->ReplaceText(sr.getBegin(), 4, "Sqrt");
+  }
+
+  // Process if statements.  These are normally scheduled to execute on the
+  // APEs, but if the if statement is invoked as a macro CU_IF (i.e., "#define
+  // CU_IF if" and later "CU_IF (condition) statement"), the if statement will
+  // be scheduled to execute on the CU.
+  void process_if_statement(const MatchFinder::MatchResult& mresult) {
+    // Define our replacement strings.
+    const IfStmt* if_stmt = mresult.Nodes.getNodeAs<IfStmt>("if-stmt");
+    if (if_stmt == nullptr)
+      return;
+    SourceManager& sm(mresult.Context->getSourceManager());
+    FullSourceLoc if_begin = FullSourceLoc(if_stmt->getIfLoc(), sm).getExpansionLoc();
+    SourceRange if_sr(if_begin, if_stmt->getLParenLoc().getLocWithOffset(-1));
+    std::string if_text(get_text(sm, if_sr));
+    std::string if_name("ApeIf");
+    std::string else_name("ApeElse()");
+    std::string fi_name("ApeFi()");
+    if (if_text == "CU_IF") {
+      if_name = "CUIf";
+      else_name = "CUElse()";
+      fi_name = "CUFi()";
+    }
+
+    // Replace "if".
+    prepare_rewriter(sm);
+    rewriter->ReplaceText(if_sr, if_name);
+
+    // Replace "else", if present.
+    FullSourceLoc else_begin = FullSourceLoc(if_stmt->getElseLoc(), sm).getExpansionLoc();
+    if (else_begin.isValid()) {
+      SourceLocation else_end(get_end_of_end(sm, else_begin));
+      SourceRange else_sr(else_begin, else_end);
+      rewriter->ReplaceText(else_sr, else_name);
+    }
+
+    // Insert "fi" at the end of the statement.
+    SourceLocation end_loc(if_stmt->getEndLoc());
+    SourceLocation fi_loc(get_end_of_end(sm, end_loc));
+    rewriter->InsertTextAfterToken(fi_loc, fi_name);
   }
 
   // Initialize the rewriter if we haven't already.
@@ -416,6 +464,9 @@ public:
 
     // Function call
     mfinder.addMatcher(callExpr().bind("call"), this);
+
+    // if statement
+    mfinder.addMatcher(ifStmt().bind("if-stmt"), this);
   }
 
   // Process all of our matches.
@@ -428,6 +479,7 @@ public:
     process_unary_operator(mresult);
     process_binary_operator(mresult);
     process_function_call(mresult);
+    process_if_statement(mresult);
   }
 };
 
