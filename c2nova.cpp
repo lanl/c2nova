@@ -188,12 +188,10 @@ private:
     const clang::Type& arg_type = *arg->getType();
     std::string mname;
     std::string after_text(")");
+    std::string inc_dec;  // Either "", "Sub" (for "--"), or "Add" (for "++")
     switch (unop->getOpcode()) {
     case UO_LNot:
       mname = "Not";
-      break;
-    case UO_Plus:
-      mname = "";
       break;
     case UO_Minus:
       // Nova doesn't appear to have a unary minus so we have to convert to a
@@ -209,6 +207,19 @@ private:
       else
         return;
       break;
+    case UO_Plus:
+      mname = "";
+      break;
+    case UO_PostDec:
+    case UO_PreDec:
+      inc_dec = "Sub";
+      after_text = ", IntConst(1))" + after_text;
+      break;
+    case UO_PostInc:
+    case UO_PreInc:
+      inc_dec = "Add";
+      after_text = ", IntConst(1))" + after_text;
+      break;
     default:
       return;  // Unknown operator
     }
@@ -217,15 +228,28 @@ private:
     SourceManager& sm(mresult.Context->getSourceManager());
     prepare_rewriter(sm);
     SourceLocation op_begin = unop->getOperatorLoc();
-    SourceLocation arg_begin = arg->getBeginLoc();
+    SourceLocation op_end;
+    if (unop->isPostfix()) {
+      SourceRange op_sr(op_begin, unop->getEndLoc());
+      op_end = get_end_of_end(sm, op_sr);
+    }
+    else
+      op_end = arg->getBeginLoc();
     const char* ptr0(sm.getCharacterData(op_begin));
-    const char* ptr1(sm.getCharacterData(arg_begin));
+    const char* ptr1(sm.getCharacterData(op_end));
     size_t op_len = ptr1 - ptr0;
     rewriter->RemoveText(op_begin, op_len);
 
-    // Wrap the operator's argument in a Nova macro plus parentheses.
-    std::string before_text(mname + "(");
+    // Specially handle increment and decrement operators by converting them to
+    // Set statements.
     SourceRange arg_sr(arg->getBeginLoc(), arg->getEndLoc());
+    std::string before_text(mname + "(");
+    if (inc_dec != "") {
+      std::string arg_text(get_text(sm, arg_sr));
+      before_text = std::string("Set(") + arg_text + ", " + inc_dec + '(';
+    }
+
+    // Wrap the operator's argument in a Nova macro plus parentheses.
     insert_before_and_after(sm, arg_sr, before_text, after_text);
   }
 
