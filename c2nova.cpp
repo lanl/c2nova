@@ -41,6 +41,8 @@ private:
   std::string get_text(SourceManager& sm, SourceRange& sr) {
     SourceLocation ofs0(sr.getBegin());
     SourceLocation ofs1(get_end_of_end(sm, sr));
+    if (ofs0.isInvalid() || ofs1.isInvalid())
+      return std::string("[c2nova:INVALID]"); // I don't know what causes this.
     const char* ptr0(sm.getCharacterData(ofs0));
     const char* ptr1(sm.getCharacterData(ofs1));
     return std::string(ptr0, ptr1);
@@ -50,6 +52,8 @@ private:
   std::string get_ident(SourceManager& sm, SourceLocation id_begin) {
     LangOptions lopt;
     SourceLocation id_end(Lexer::getLocForEndOfToken(id_begin, 0, sm, lopt));
+    if (id_begin.isInvalid() || id_end.isInvalid())
+      return std::string("[c2nova:INVALID]"); // I don't know what causes this.
     const char* ptr0(sm.getCharacterData(id_begin));
     const char* ptr1(sm.getCharacterData(id_end));
     return std::string(ptr0, ptr1);
@@ -182,7 +186,12 @@ private:
       return;
     std::string mname;
     switch (binop->getOpcode()) {
+    case BO_Div:
+    case BO_DivAssign:
+      mname = "Div";
+      break;
     case BO_Add:
+    case BO_AddAssign:
       mname = "Add";
       break;
     case BO_Assign:
@@ -191,6 +200,10 @@ private:
     case BO_Mul:
     case BO_MulAssign:
       mname = "Mul";
+      break;
+    case BO_Sub:
+    case BO_SubAssign:
+      mname = "Sub";
       break;
     default:
       return;  // Unknown operator
