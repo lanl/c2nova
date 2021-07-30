@@ -232,6 +232,19 @@ private:
     insert_before_and_after(sm, sr, before_text, after_text);
   }
 
+  // Process function calls.  Currently, this merely renames sqrt() to Sqrt().
+  void process_function_call(const MatchFinder::MatchResult& mresult) {
+    const CallExpr* call = mresult.Nodes.getNodeAs<CallExpr>("call");
+    if (call == nullptr)
+      return;
+    SourceManager& sm(mresult.Context->getSourceManager());
+    const Expr* callee = call->getCallee();
+    SourceRange sr(callee->getSourceRange());
+    std::string callee_name = get_text(sm, sr);
+    if (callee_name == "sqrt")
+      rewriter->ReplaceText(sr.getBegin(), 4, "Sqrt");
+  }
+
   // Initialize the rewriter if we haven't already.
   void prepare_rewriter(SourceManager& sm) {
     if (rewriter != nullptr)
@@ -284,6 +297,9 @@ public:
     // Binary operator, either not within a for loop or within the for loop's
     // body.
     mfinder.addMatcher(binaryOperator().bind("bin-op"), this);
+
+    // Function call
+    mfinder.addMatcher(callExpr().bind("call"), this);
   }
 
   // Process all of our matches.
@@ -294,6 +310,7 @@ public:
     process_float_var_decl(mresult);
     process_cast_expr(mresult);
     process_binary_operator(mresult);
+    process_function_call(mresult);
   }
 };
 
