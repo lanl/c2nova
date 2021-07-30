@@ -176,11 +176,29 @@ private:
 
   // Wrap each binary operator in a corresponding Nova macros.
   void process_binary_operator(const MatchFinder::MatchResult& mresult) {
+    // Map a Clang operator to a Nova macro name.
     const BinaryOperator* binop = mresult.Nodes.getNodeAs<BinaryOperator>("bin-op");
     if (binop == nullptr)
       return;
+    std::string mname;
+    switch (binop->getOpcode()) {
+    case BO_Add:
+      mname = "Add";
+      break;
+    default:
+      return;  // Unknown operator
+    }
 
-    // TODO: Put code here.
+    // Change the operator to a comma.
+    SourceManager& sm(mresult.Context->getSourceManager());
+    prepare_rewriter(sm);
+    SourceLocation op_loc = binop->getOperatorLoc();
+    StringRef op_text = binop->getOpcodeStr();
+    rewriter->ReplaceText(op_loc, op_text.size(), ",");
+
+    // Wrap the entire operation in a Nova macro.
+    SourceRange sr(binop->getBeginLoc(), binop->getEndLoc());
+    insert_before_and_after(sm, sr, mname + "(", ")");
   }
 
   // Initialize the rewriter if we haven't already.
