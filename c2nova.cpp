@@ -115,7 +115,7 @@ private:
                         const StringRef bind_name,
                         const std::string nova_type) {
     // Extract the declaration in both raw and textual forms.
-    const Decl* decl = mresult.Nodes.getNodeAs<Decl>(bind_name);
+    const VarDecl* decl = mresult.Nodes.getNodeAs<VarDecl>(bind_name);
     if (decl == nullptr)
       return;
     SourceManager& sm(mresult.Context->getSourceManager());
@@ -141,19 +141,15 @@ private:
     std::string var_name(get_ident(sm, decl->getLocation()));
 
     // Generate a replacement either with or without an initializer.
-    const Expr* rhs = mresult.Nodes.getNodeAs<Expr>("rhs");
-    std::string fname(sm.getFilename(ofs0).str());
+    const Expr* rhs = decl->getInit();
     prepare_rewriter(sm);
     if (rhs == nullptr)
       // No initializer.
       rewriter->ReplaceText(ofs0, text.length(), declare + "Init(" + var_name + ", " + nova_type + ")");
     else {
       // Initializer.
-      const char* ptr0(sm.getCharacterData(ofs0));
-      SourceRange rhs_sr(fix_sr(sm, rhs->getSourceRange()));
-      SourceLocation rhs_ofs0(rhs_sr.getBegin());
-      const char* rhs_ptr0(sm.getCharacterData(rhs_ofs0));
-      rewriter->ReplaceText(ofs0, rhs_ptr0 - ptr0, declare + "Init(" + var_name + ", " + nova_type + ", ");
+      SourceRange up_to_rhs(fix_sr(sm, ofs0, rhs->getBeginLoc().getLocWithOffset(-1)));
+      rewriter->ReplaceText(up_to_rhs, declare + "Init(" + var_name + ", " + nova_type + ",");
       SourceLocation ofs1(get_end_of_end(sm, sr));
       rewriter->InsertTextAfter(ofs1, ")");
     }
@@ -459,18 +455,8 @@ public:
   // Add a set of matchers to a finder.
   void add_matchers(MatchFinder& mfinder) {
     // Variable declarations (int or float, with or without an initializer)
-    mfinder.addMatcher(varDecl(hasType(isInteger()),
-                               unless(hasInitializer(expr().bind("rhs"))))
-                       .bind("int-decl"), this);
-    mfinder.addMatcher(varDecl(hasType(isInteger()),
-                               hasInitializer(expr().bind("rhs")))
-                       .bind("int-decl"), this);
-    mfinder.addMatcher(varDecl(hasType(realFloatingPointType()),
-                               unless(hasInitializer(expr().bind("rhs"))))
-                       .bind("float-decl"), this);
-    mfinder.addMatcher(varDecl(hasType(realFloatingPointType()),
-                               hasInitializer(expr().bind("rhs")))
-                       .bind("float-decl"), this);
+    mfinder.addMatcher(varDecl(hasType(isInteger())).bind("int-decl"), this);
+    mfinder.addMatcher(varDecl(hasType(realFloatingPointType())).bind("float-decl"), this);
 
     // Int and float literals
     mfinder.addMatcher(integerLiteral().bind("int-lit"), this);
