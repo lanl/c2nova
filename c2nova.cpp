@@ -111,11 +111,9 @@ private:
   // Wrap integer/float variable declarations with "DeclareApeVar" or
   // "DeclareApeVarInit", as appropriate.  This serves a helper function for
   // process_integer_decl() and process_float_decl().
-  void process_var_decl(const MatchFinder::MatchResult& mresult,
-                        const StringRef bind_name,
-                        const std::string nova_type) {
+  void process_var_decl(const MatchFinder::MatchResult& mresult) {
     // Extract the declaration in both raw and textual forms.
-    const VarDecl* decl = mresult.Nodes.getNodeAs<VarDecl>(bind_name);
+    const VarDecl* decl = mresult.Nodes.getNodeAs<VarDecl>("var-decl");
     if (decl == nullptr)
       return;
     SourceManager& sm(mresult.Context->getSourceManager());
@@ -140,6 +138,16 @@ private:
     // Extract the variable name.
     std::string var_name(get_ident(sm, decl->getLocation()));
 
+    // Convert the C variable type to Nova.
+    std::string nova_type;
+    const clang::Type& var_type = *decl->getType();
+    if (var_type.isIntegerType())
+      nova_type = "Int";
+    else if (var_type.isFloatingType())
+      nova_type = "Approx";
+    else
+      return;  // Unrecognized type
+
     // Generate a replacement either with or without an initializer.
     const Expr* rhs = decl->getInit();
     prepare_rewriter(sm);
@@ -153,18 +161,6 @@ private:
       SourceLocation ofs1(get_end_of_end(sm, sr));
       rewriter->InsertTextAfter(ofs1, ")");
     }
-  }
-
-  // Wrap integer variable declarations with "DeclareApeVar" or
-  // "DeclareApeVarInit".
-  void process_int_var_decl(const MatchFinder::MatchResult& mresult) {
-    process_var_decl(mresult, StringRef("int-decl"), std::string("Int"));
-  }
-
-  // Wrap floating-point variable declarations with "DeclareApeVar" or
-  // "DeclareApeVarInit".
-  void process_float_var_decl(const MatchFinder::MatchResult& mresult) {
-    process_var_decl(mresult, StringRef("float-decl"), std::string("Approx"));
   }
 
   // Wrap integer literals with "IntConst".
@@ -455,8 +451,7 @@ public:
   // Add a set of matchers to a finder.
   void add_matchers(MatchFinder& mfinder) {
     // Variable declarations (int or float, with or without an initializer)
-    mfinder.addMatcher(varDecl(hasType(isInteger())).bind("int-decl"), this);
-    mfinder.addMatcher(varDecl(hasType(realFloatingPointType())).bind("float-decl"), this);
+    mfinder.addMatcher(varDecl().bind("var-decl"), this);
 
     // Int and float literals
     mfinder.addMatcher(integerLiteral().bind("int-lit"), this);
@@ -482,8 +477,7 @@ public:
   virtual void run(const MatchFinder::MatchResult& mresult) {
     process_integer_literal(mresult);
     process_float_literal(mresult);
-    process_int_var_decl(mresult);
-    process_float_var_decl(mresult);
+    process_var_decl(mresult);
     process_cast_expr(mresult);
     process_unary_operator(mresult);
     process_binary_operator(mresult);
