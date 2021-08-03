@@ -396,6 +396,27 @@ private:
     insert_before_and_after(sm, sr, before_text, after_text);
   }
 
+  // Process array indexing.
+  void process_array_index(const MatchFinder::MatchResult& mresult) {
+    // Extract the expression's base and index.
+    const ArraySubscriptExpr* aindex = mresult.Nodes.getNodeAs<ArraySubscriptExpr>("arr-idx");
+    if (aindex == nullptr)
+      return;
+    const Expr* base = aindex->getBase();
+    const Expr* idx = aindex->getIdx();
+
+    // Wrap the base and index within a Nova macro invocation:
+    // a[i] --> IndexVector(a, i).
+    SourceManager& sm(mresult.Context->getSourceManager());
+    SourceRange base_sr(fix_sr(sm, base->getSourceRange()));
+    SourceRange idx_sr(fix_sr(sm, idx->getSourceRange()));
+    rewriter->InsertText(base->getBeginLoc(), "IndexVector(");
+    SourceRange lbrack_sr(get_end_of_end(sm, base_sr),
+			  idx_sr.getBegin().getLocWithOffset(-1));
+    rewriter->ReplaceText(lbrack_sr, ", ");
+    rewriter->ReplaceText(aindex->getRBracketLoc(), 1, ")");
+  }
+
   // Process function calls.  Currently, this merely renames sqrt() to Sqrt().
   void process_function_call(const MatchFinder::MatchResult& mresult) {
     const CallExpr* call = mresult.Nodes.getNodeAs<CallExpr>("call");
@@ -493,6 +514,9 @@ public:
     // Binary operator
     mfinder.addMatcher(binaryOperator().bind("bin-op"), this);
 
+    // Array indexing
+    mfinder.addMatcher(arraySubscriptExpr().bind("arr-idx"), this);
+
     // Function call
     mfinder.addMatcher(callExpr().bind("call"), this);
 
@@ -508,6 +532,7 @@ public:
     process_cast_expr(mresult);
     process_unary_operator(mresult);
     process_binary_operator(mresult);
+    process_array_index(mresult);
     process_function_call(mresult);
     process_if_statement(mresult);
   }

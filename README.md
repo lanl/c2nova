@@ -36,7 +36,7 @@ Limitations
 
 The current implementation of `c2nova` is rather crude.  It therefore exhibits a number of limitations:
 
-* 1-D and 2-D arrays are not yet implemented.
+* 1-D arrays must have a constant number of elements.  2-D arrays are not yet implemented.
 
 * `for` loops need to be expressed directly in Nova: `CUFor(i, IntConst(1), IntConst(10), IntConst(1));`…`CuForEnd();`.
 
@@ -51,6 +51,8 @@ The current implementation of `c2nova` is rather crude.  It therefore exhibits a
 * C operations with no Nova equivalent (e.g., `%`) are left untranslated.
 
 * Function headers (e.g., `int myfunc(int x)`) have no Nova equivalent but will be translated anyway.
+
+As of this writing, `c2nova` has not been tested against the actual Nova macro library.  It is quite possible that *nothing* works.
 
 Author
 ------
