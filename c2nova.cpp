@@ -133,27 +133,54 @@ private:
       if (comment.contains("[mem]"))
         what = StringRef("Mem");
     }
-    std::string declare(std::string("Declare") + where.str() + what.str());
 
     // Extract the variable name.
     std::string var_name(get_ident(sm, decl->getLocation()));
 
     // Convert the C variable type to Nova.
-    std::string nova_type;
+    std::string nova_type;    // "Int" or "Approx"
+    std::string vector_size;  // Vector size or empty
+    bool is_scalar = true;
     const clang::Type& var_type = *decl->getType();
-    if (var_type.isIntegerType())
+    if (var_type.isConstantArrayType()) {
+      // Determine the number of elements in the array.
+      auto arr_type = cast<ConstantArrayType>(&var_type);
+      if (arr_type == nullptr)
+        return;  // Unreachable?
+      SmallString<25> nelt_str;
+      arr_type->getSize().toString(nelt_str, 10, false, true);
+      vector_size = std::string(", ") + std::string(nelt_str);
+      what = StringRef("MemVector");  // Vectors must reside in memory.
+      is_scalar = false;
+
+      // Determine the type of each element.
+      const clang::Type& elt_type = *arr_type->getElementType();
+      if (elt_type.isIntegerType())
+        nova_type = "Int";
+      else if (elt_type.isFloatingType())
+        nova_type = "Approx";
+      else
+        return;  // Unrecognized array type
+    }
+    else if (var_type.isIntegerType())
       nova_type = "Int";
     else if (var_type.isFloatingType())
       nova_type = "Approx";
     else
-      return;  // Unrecognized type
+      return;  // Unrecognized scalar type
 
     // Generate a replacement either with or without an initializer.
+    std::string declare(std::string("Declare") + where.str() + what.str());
     const Expr* rhs = decl->getInit();
     prepare_rewriter(sm);
     if (rhs == nullptr)
       // No initializer.
-      rewriter->ReplaceText(ofs0, text.length(), declare + "Init(" + var_name + ", " + nova_type + ")");
+      if (is_scalar)
+	// Nice rewriting
+	rewriter->ReplaceText(sr, declare + '(' + var_name + ", " + nova_type + vector_size + ')');
+      else
+	// Ugly hack to define vectors
+	rewriter->InsertText(sr.getBegin(), declare + '(' + var_name + ", " + nova_type + vector_size + ");  // ");
     else {
       // Initializer.
       SourceRange up_to_rhs(fix_sr(sm, ofs0, rhs->getBeginLoc().getLocWithOffset(-1)));
@@ -266,7 +293,7 @@ private:
     // Specially handle increment and decrement operators by converting them to
     // Set statements.
     SourceRange arg_sr(fix_sr(sm, arg->getSourceRange()));
-    std::string before_text(mname + "(");
+    std::string before_text(mname + '(');
     if (inc_dec != "") {
       std::string arg_text(get_text(sm, arg_sr));
       before_text = std::string("Set(") + arg_text + ", " + inc_dec + '(';
@@ -354,14 +381,14 @@ private:
     rewriter->ReplaceText(op_loc, op_text.size(), ",");
 
     // Expand compound operators (e.g., "a *= b" becomes "Set(a, Mul(a, b))").
-    std::string before_text(mname + "(");
+    std::string before_text(mname + '(');
     std::string after_text(")");
     if (binop->isCompoundAssignmentOp()) {
       Expr* lhs = binop->getLHS();
       SourceRange sr(fix_sr(sm, lhs->getSourceRange()));
       std::string lhs_text(get_text(sm, sr));
       before_text = std::string("Set(") + lhs_text + ", " + before_text;
-      after_text += ")";
+      after_text += ')';
     }
 
     // Wrap the entire operation in a Nova macro.
