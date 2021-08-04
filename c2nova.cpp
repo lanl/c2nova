@@ -291,21 +291,21 @@ private:
       // No initializer.
       if (type_info.dimens == 0)
         // Use nice rewriting for declaring scalars.
-        rewrite_queue.push(PriRewrite(50, mod_replace, sr,
+        rewrite_queue.push(PriRewrite(60, mod_replace, sr,
                                       declare + '(' + var_name + ", " + nova_type + ')'));
       else
         // Use an ugly hack to define vectors and arrays (commenting out the
         // code we don't know how to transform and inserting all-new code
         // before it).
-        rewrite_queue.push(PriRewrite(50, mod_ins_before, sr,
+        rewrite_queue.push(PriRewrite(60, mod_ins_before, sr,
                                       declare + '(' + var_name + ", " + nova_type + size_args + ");  // "));
     else {
       // Initializer.
       SourceRange up_to_rhs(fix_sr(sm, ofs0, rhs->getBeginLoc().getLocWithOffset(-1)));
-      rewrite_queue.push(PriRewrite(50, mod_replace, up_to_rhs,
+      rewrite_queue.push(PriRewrite(60, mod_replace, up_to_rhs,
                                     declare + "Init(" + var_name + ", " + nova_type + ","));
       SourceLocation ofs1(get_end_of_end(sm, sr));
-      rewrite_queue.push(PriRewrite(50, mod_ins_after, ofs1, ")"));
+      rewrite_queue.push(PriRewrite(60, mod_ins_after, ofs1, ")"));
     }
   }
 
@@ -356,15 +356,15 @@ private:
     SourceRange sr(fix_sr(sm, cast->getSourceRange()));
     if (exp_cast == nullptr)
       // Implicit cast
-      insert_before_and_after(20, sm, sr, std::string("Cast(") + cast_str + ", ", ")");
+      insert_before_and_after(50, sm, sr, std::string("Cast(") + cast_str + ", ", ")");
     else {
       // Explicit cast
       const Expr* sub_expr = cast->getSubExpr();
       SourceRange sub_sr(fix_sr(sm, sub_expr->getSourceRange()));
       SourceRange type_sr(sr.getBegin(), sub_sr.getBegin().getLocWithOffset(-1));
-      rewrite_queue.push(PriRewrite(20, mod_replace, type_sr,
+      rewrite_queue.push(PriRewrite(50, mod_replace, type_sr,
                                     std::string("Cast(") + cast_str + ", "));
-      rewrite_queue.push(PriRewrite(20, mod_ins_after, get_end_of_end(sm, sr), ")"));
+      rewrite_queue.push(PriRewrite(50, mod_ins_after, get_end_of_end(sm, sr), ")"));
     }
   }
 
@@ -568,9 +568,9 @@ private:
                           idx_sr.getBegin().getLocWithOffset(-1));
     if (base_base == nullptr) {
       // a[i] --> IndexVector(a, i)
-      rewrite_queue.push(PriRewrite(50, mod_ins_before, base->getBeginLoc(), "IndexVector("));
-      rewrite_queue.push(PriRewrite(50, mod_replace, lbrack_sr, ", "));
-      rewrite_queue.push(PriRewrite(50, mod_replace, aindex->getRBracketLoc(), 1, ")"));
+      rewrite_queue.push(PriRewrite(60, mod_ins_before, base->getBeginLoc(), "IndexVector("));
+      rewrite_queue.push(PriRewrite(60, mod_replace, lbrack_sr, ", "));
+      rewrite_queue.push(PriRewrite(60, mod_replace, aindex->getRBracketLoc(), 1, ")"));
     } else {
       // a[i][j] --> IndexArray(a, i, j)
       SourceRange base_base_sr(fix_sr(sm, base_base->getSourceRange()));
@@ -579,10 +579,10 @@ private:
                                  base_idx_sr.getBegin().getLocWithOffset(-1));
       SourceRange inner_bracks_sr(base_ase->getRBracketLoc(),
                                   idx_sr.getBegin().getLocWithOffset(-1));
-      rewrite_queue.push(PriRewrite(50, mod_ins_before, base->getBeginLoc(), "IndexArray("));
-      rewrite_queue.push(PriRewrite(50, mod_replace, base_lbrack_sr, ", "));
-      rewrite_queue.push(PriRewrite(50, mod_replace, inner_bracks_sr, ", "));
-      rewrite_queue.push(PriRewrite(50, mod_replace,
+      rewrite_queue.push(PriRewrite(60, mod_ins_before, base->getBeginLoc(), "IndexArray("));
+      rewrite_queue.push(PriRewrite(60, mod_replace, base_lbrack_sr, ", "));
+      rewrite_queue.push(PriRewrite(60, mod_replace, inner_bracks_sr, ", "));
+      rewrite_queue.push(PriRewrite(60, mod_replace,
                                     aindex->getRBracketLoc(), 1, ")"));
     }
   }
@@ -622,20 +622,20 @@ private:
     }
 
     // Replace "if".
-    rewrite_queue.push(PriRewrite(60, mod_replace, if_sr, if_name));
+    rewrite_queue.push(PriRewrite(70, mod_replace, if_sr, if_name));
 
     // Replace "else", if present.
     SourceLocation else_begin(fix_sl(sm, if_stmt->getElseLoc()));
     if (else_begin.isValid()) {
       SourceLocation else_end(get_end_of_end(sm, else_begin));
       SourceRange else_sr(else_begin, else_end);
-      rewrite_queue.push(PriRewrite(60, mod_replace, else_sr, else_name));
+      rewrite_queue.push(PriRewrite(70, mod_replace, else_sr, else_name));
     }
 
     // Insert "fi" at the end of the statement.
     SourceLocation end_loc(fix_sl(sm, if_stmt->getEndLoc()));
     SourceLocation fi_loc(get_end_of_end(sm, end_loc));
-    rewrite_queue.push(PriRewrite(60, mod_ins_after, fi_loc, fi_name));
+    rewrite_queue.push(PriRewrite(70, mod_ins_after, fi_loc, fi_name));
   }
 
 public:

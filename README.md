@@ -54,6 +54,8 @@ The current implementation of `c2nova` is rather crude.  It therefore exhibits a
 
 * `c2nova` will translate casts between integers and floating-point values, but these are not actually supported by Nova.
 
+* `c2nova` will translate integer multiplication and division, but these are not actually supported by Nova.
+
 As of this writing, `c2nova` has not been tested against the actual Nova macro library.  It is quite possible that *nothing* works.
 
 Author
