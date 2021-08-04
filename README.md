@@ -36,7 +36,7 @@ Limitations
 
 The current implementation of `c2nova` is rather crude.  It therefore exhibits a number of limitations:
 
-* 1-D arrays must have a constant number of elements.  2-D arrays are not yet implemented.
+* 1-D and 2-D arrays must have a constant number of elements.
 
 * `for` loops need to be expressed directly in Nova: `CUFor(i, IntConst(1), IntConst(10), IntConst(1));`…`CuForEnd();`.
 

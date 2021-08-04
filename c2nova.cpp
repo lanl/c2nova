@@ -182,7 +182,7 @@ private:
   // process_integer_decl() and process_float_decl().
   void process_var_decl(const MatchFinder::MatchResult& mresult) {
     // Extract the declaration in both raw and textual forms.
-    const VarDecl* decl = mresult.Nodes.getNodeAs<VarDecl>("var-decl");
+   const VarDecl* decl = mresult.Nodes.getNodeAs<VarDecl>("var-decl");
     if (decl == nullptr)
       return;
     SourceManager& sm(mresult.Context->getSourceManager());
@@ -455,7 +455,7 @@ private:
     insert_before_and_after(sm, sr, before_text, after_text);
   }
 
-  // Process array indexing.
+  // Process vector and array indexing.
   void process_array_index(const MatchFinder::MatchResult& mresult) {
     // Extract the expression's base and index.
     const ArraySubscriptExpr* aindex = mresult.Nodes.getNodeAs<ArraySubscriptExpr>("arr-idx");
@@ -464,16 +464,44 @@ private:
     const Expr* base = aindex->getBase();
     const Expr* idx = aindex->getIdx();
 
-    // Wrap the base and index within a Nova macro invocation:
-    // a[i] --> IndexVector(a, i).
+    // Determine if the base is itself an array-index expression (i.e., part of
+    // a 2-D array access).
+    const ArraySubscriptExpr* base_ase = nullptr;
+    const Expr* base_base = nullptr;
+    const Expr* base_idx = nullptr;
+    const ImplicitCastExpr* base_ice = dyn_cast<ImplicitCastExpr>(base);
+    if (base_ice != nullptr) {
+      base_ase = dyn_cast<ArraySubscriptExpr>(base_ice->getSubExpr());
+      if (base_ase != nullptr) {
+        base_base = base_ase->getBase();
+        base_idx = base_ase->getIdx();
+      }
+    }
+
+    // Translate the expression from C to Nova.
     SourceManager& sm(mresult.Context->getSourceManager());
     SourceRange base_sr(fix_sr(sm, base->getSourceRange()));
     SourceRange idx_sr(fix_sr(sm, idx->getSourceRange()));
-    rewriter->InsertText(base->getBeginLoc(), "IndexVector(");
     SourceRange lbrack_sr(get_end_of_end(sm, base_sr),
                           idx_sr.getBegin().getLocWithOffset(-1));
-    rewriter->ReplaceText(lbrack_sr, ", ");
-    rewriter->ReplaceText(aindex->getRBracketLoc(), 1, ")");
+    if (base_base == nullptr) {
+      // a[i] --> IndexVector(a, i)
+      rewriter->InsertText(base->getBeginLoc(), "IndexVector(");
+      rewriter->ReplaceText(lbrack_sr, ", ");
+      rewriter->ReplaceText(aindex->getRBracketLoc(), 1, ")");
+    } else {
+      // a[i][j] --> IndexArray(a, i, j)
+      SourceRange base_base_sr(fix_sr(sm, base_base->getSourceRange()));
+      SourceRange base_idx_sr(fix_sr(sm, base_idx->getSourceRange()));
+      SourceRange base_lbrack_sr(get_end_of_end(sm, base_base_sr),
+                                 base_idx_sr.getBegin().getLocWithOffset(-1));
+      SourceRange inner_bracks_sr(base_ase->getRBracketLoc(),
+                                  idx_sr.getBegin().getLocWithOffset(-1));
+      rewriter->InsertText(base->getBeginLoc(), "IndexArray(");
+      rewriter->ReplaceText(base_lbrack_sr, ", ");
+      rewriter->ReplaceText(inner_bracks_sr, ", ");
+      rewriter->ReplaceText(aindex->getRBracketLoc(), 1, ")");
+    }
   }
 
   // Process function calls.  Currently, this merely renames sqrt() to Sqrt().
@@ -573,8 +601,8 @@ public:
     // Binary operator
     mfinder.addMatcher(binaryOperator().bind("bin-op"), this);
 
-    // Array indexing
-    mfinder.addMatcher(arraySubscriptExpr().bind("arr-idx"), this);
+    // Array indexing (only the topmost, so not the "a[i]" in "a[i][j]").
+    mfinder.addMatcher(arraySubscriptExpr(unless(hasAncestor(arraySubscriptExpr()))).bind("arr-idx"), this);
 
     // Function call
     mfinder.addMatcher(callExpr().bind("call"), this);
