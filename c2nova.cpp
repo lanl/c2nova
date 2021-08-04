@@ -291,9 +291,21 @@ private:
     }
 
     // Perform the cast.
+    const ExplicitCastExpr* exp_cast = dyn_cast<ExplicitCastExpr>(cast);
     SourceManager& sm(mresult.Context->getSourceManager());
+    prepare_rewriter(sm);
     SourceRange sr(fix_sr(sm, cast->getSourceRange()));
-    insert_before_and_after(sm, sr, std::string("Cast(") + cast_str + ", ", ")");
+    if (exp_cast == nullptr)
+      // Implicit cast
+      insert_before_and_after(sm, sr, std::string("Cast(") + cast_str + ", ", ")");
+    else {
+      // Explicit cast
+      const Expr* sub_expr = cast->getSubExpr();
+      SourceRange sub_sr(fix_sr(sm, sub_expr->getSourceRange()));
+      SourceRange type_sr(sr.getBegin(), sub_sr.getBegin().getLocWithOffset(-1));
+      rewriter->ReplaceText(type_sr, std::string("Cast(") + cast_str + ", ");
+      rewriter->InsertTextAfter(get_end_of_end(sm, sr), ")");
+    }
   }
 
   // Replace each unary operator with a corresponding Nova macro.
