@@ -284,8 +284,15 @@ private:
     else if (type_info.dimens == 2)
       size_args = std::string(", ") + type_info.rows + std::string(", ") + type_info.cols;
 
+    // As a special case, top-level variables can only be declared, not defined.
+    std::string declare(where.str() + what.str());
+    if (decl->hasGlobalStorage())
+      rewrite_queue.push(PriRewrite(60, mod_ins_before, sr,
+                                    std::string("Declare(") + var_name + ");  // Within a function: "));
+    else
+      declare = std::string("Declare") + declare;
+
     // Generate a replacement either with or without an initializer.
-    std::string declare(std::string("Declare") + where.str() + what.str());
     const Expr* rhs = decl->getInit();
     if (rhs == nullptr)
       // No initializer.
