@@ -42,8 +42,6 @@ The current implementation of `c2nova` is rather crude.  It therefore exhibits a
 
 * Hiding C constructs behind C macros will often confuse `c2nova`.
 
-* Implicit casts will typically lead to incorrect Nova code being generated.
-
 * All C integer data types are mapped to a Nova `Int`, and all C floating-point data types are mapped to a nova `Approx`.  No other data types are supported.
 
 * Pre/post increment/decrement (i.e., `x++`, `x--`, `++x`, and `--x`) must appear only as standalone statements, not as expressions nested within other expressions.
@@ -51,6 +49,10 @@ The current implementation of `c2nova` is rather crude.  It therefore exhibits a
 * C operations with no Nova equivalent (e.g., `%`) are left untranslated.
 
 * Function headers (e.g., `int myfunc(int x)`) have no Nova equivalent but will be translated anyway.
+
+* Array accesses appearing on the left-hand side of a compound assignment operator (e.g., `+=`) will not be translated to Nova.
+
+* `c2nova` will translate casts between integers and floating-point values, but these are not actually supported by Nova.
 
 As of this writing, `c2nova` has not been tested against the actual Nova macro library.  It is quite possible that *nothing* works.
 
