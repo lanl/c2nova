@@ -164,6 +164,11 @@ private:
       dimens = -1;
 
       // Check if we were given a scalar.
+      if (var_type->isBooleanType()) {
+        dimens = 0;
+        elt_type = "Bool";
+        return;
+      }
       if (var_type->isIntegerType()) {
         dimens = 0;
         elt_type = "Int";
@@ -185,6 +190,11 @@ private:
       vec_type->getSize().toString(nelt_str, 10, false, true);
       rows = std::string(nelt_str);
       const clang::Type& vec_elt_type = *vec_type->getElementType();
+      if (vec_elt_type.isBooleanType()) {
+        dimens = 1;
+        elt_type = "Bool";
+        return;
+      }
       if (vec_elt_type.isIntegerType()) {
         dimens = 1;
         elt_type = "Int";
@@ -207,6 +217,11 @@ private:
       arr_type->getSize().toString(nelt_str, 10, false, true);
       cols = std::string(nelt_str);
       const clang::Type& arr_elt_type = *arr_type->getElementType();
+      if (arr_elt_type.isBooleanType()) {
+        dimens = 2;
+        elt_type = "Bool";
+        return;
+      }
       if (arr_elt_type.isIntegerType()) {
         dimens = 2;
         elt_type = "Int";
@@ -458,6 +473,18 @@ private:
       break;
     case BO_LOr:
       mname = "Or";
+      break;
+
+      // Bitwise operators (Boolean op Boolean -> Boolean)
+      // Technically, these work on integers but ignore all but the LSB.
+    case BO_And:
+      mname = "And";
+      break;
+    case BO_Or:
+      mname = "Or";
+      break;
+    case BO_Xor:
+      mname = "Xor";
       break;
 
       // Relational operators (number op number -> Boolean)
