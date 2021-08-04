@@ -108,6 +108,75 @@ private:
     rewriter->InsertTextAfter(ofs0.getLocWithOffset(text.length()), after_text);
   }
 
+  // Describe a variable declaration.
+  class VarDeclInfo {
+  public:
+    int dimens;            // -1 for invalid, 0 for scalar, 1 for vector, 2 for array
+    std::string rows;      // Number of rows (2-D), vector length (1-D), or empty (scalar)
+    std::string cols;      // Number of columns (2-D) or empty (1-D or scalar)
+    std::string elt_type;  // Nova element type
+
+    explicit VarDeclInfo(const clang::Type* var_type) {
+      // Assume invalid
+      dimens = -1;
+
+      // Check if we were given a scalar.
+      if (var_type->isIntegerType()) {
+        dimens = 0;
+        elt_type = "Int";
+        return;
+      }
+      if (var_type->isFloatingType()) {
+        dimens = 0;
+        elt_type = "Approx";
+        return;
+      }
+
+      // We were given a vector or possibly a vector of vectors.
+      if (!var_type->isConstantArrayType())
+        return;
+      auto vec_type = cast<ConstantArrayType>(var_type);
+      if (vec_type == nullptr)
+        return;  // Unreachable?
+      SmallString<25> nelt_str;
+      vec_type->getSize().toString(nelt_str, 10, false, true);
+      rows = std::string(nelt_str);
+      const clang::Type& vec_elt_type = *vec_type->getElementType();
+      if (vec_elt_type.isIntegerType()) {
+        dimens = 1;
+        elt_type = "Int";
+        return;
+      }
+      if (vec_elt_type.isFloatingType()) {
+        dimens = 1;
+        elt_type = "Approx";
+        return;
+      }
+
+      // We were given a vector of vectors or possibly a vector of vectors of
+      // vectors (the latter being deemed invalid for translation to Nova).
+      if (!vec_elt_type.isConstantArrayType())
+        return;
+      auto arr_type = cast<ConstantArrayType>(&vec_elt_type);
+      if (arr_type == nullptr)
+        return;  // Unreachable?
+      nelt_str.clear();
+      arr_type->getSize().toString(nelt_str, 10, false, true);
+      cols = std::string(nelt_str);
+      const clang::Type& arr_elt_type = *arr_type->getElementType();
+      if (arr_elt_type.isIntegerType()) {
+        dimens = 2;
+        elt_type = "Int";
+        return;
+      }
+      if (arr_elt_type.isFloatingType()) {
+        dimens = 2;
+        elt_type = "Approx";
+        return;
+      }
+    }
+  };
+
   // Wrap integer/float variable declarations with "DeclareApeVar" or
   // "DeclareApeVarInit", as appropriate.  This serves a helper function for
   // process_integer_decl() and process_float_decl().
@@ -120,6 +189,12 @@ private:
     SourceRange sr(fix_sr(sm, decl->getSourceRange()));
     SourceLocation ofs0(sr.getBegin());
     std::string text(get_text(sm, sr));
+
+    // Ensure we were given a data type we recognize.
+    const clang::Type& var_type = *decl->getType();
+    const VarDeclInfo type_info(&var_type);
+    if (type_info.dimens < 0)
+      return;
 
     // Look for magic comments to control allocation.
     StringRef where("Ape");
@@ -138,36 +213,18 @@ private:
     std::string var_name(get_ident(sm, decl->getLocation()));
 
     // Convert the C variable type to Nova.
-    std::string nova_type;    // "Int" or "Approx"
-    std::string vector_size;  // Vector size or empty
-    bool is_scalar = true;
-    const clang::Type& var_type = *decl->getType();
-    if (var_type.isConstantArrayType()) {
-      // Determine the number of elements in the array.
-      auto arr_type = cast<ConstantArrayType>(&var_type);
-      if (arr_type == nullptr)
-        return;  // Unreachable?
-      SmallString<25> nelt_str;
-      arr_type->getSize().toString(nelt_str, 10, false, true);
-      vector_size = std::string(", ") + std::string(nelt_str);
+    std::string nova_type = type_info.elt_type;    // "Int" or "Approx"
+    if (type_info.dimens == 1)
       what = StringRef("MemVector");  // Vectors must reside in memory.
-      is_scalar = false;
+    else if (type_info.dimens == 2)
+      what = StringRef("MemArray");   // Arrays must reside in memory.
 
-      // Determine the type of each element.
-      const clang::Type& elt_type = *arr_type->getElementType();
-      if (elt_type.isIntegerType())
-        nova_type = "Int";
-      else if (elt_type.isFloatingType())
-        nova_type = "Approx";
-      else
-        return;  // Unrecognized array type
-    }
-    else if (var_type.isIntegerType())
-      nova_type = "Int";
-    else if (var_type.isFloatingType())
-      nova_type = "Approx";
-    else
-      return;  // Unrecognized scalar type
+    // Include extra arguments for vector/array sizes.
+    std::string size_args;  // Vector size or empty
+    if (type_info.dimens == 1)
+      size_args = std::string(", ") + type_info.rows;
+    else if (type_info.dimens == 2)
+      size_args = std::string(", ") + type_info.rows + std::string(", ") + type_info.cols;
 
     // Generate a replacement either with or without an initializer.
     std::string declare(std::string("Declare") + where.str() + what.str());
@@ -175,12 +232,14 @@ private:
     prepare_rewriter(sm);
     if (rhs == nullptr)
       // No initializer.
-      if (is_scalar)
-	// Nice rewriting
-	rewriter->ReplaceText(sr, declare + '(' + var_name + ", " + nova_type + vector_size + ')');
+      if (type_info.dimens == 0)
+        // Use nice rewriting for declaring scalars.
+        rewriter->ReplaceText(sr, declare + '(' + var_name + ", " + nova_type + ')');
       else
-	// Ugly hack to define vectors
-	rewriter->InsertText(sr.getBegin(), declare + '(' + var_name + ", " + nova_type + vector_size + ");  // ");
+        // Use an ugly hack to define vectors and arrays (commenting out the
+        // code we don't know how to transform and inserting all-new code
+        // before it).
+        rewriter->InsertText(sr.getBegin(), declare + '(' + var_name + ", " + nova_type + size_args + ");  // ");
     else {
       // Initializer.
       SourceRange up_to_rhs(fix_sr(sm, ofs0, rhs->getBeginLoc().getLocWithOffset(-1)));
@@ -412,7 +471,7 @@ private:
     SourceRange idx_sr(fix_sr(sm, idx->getSourceRange()));
     rewriter->InsertText(base->getBeginLoc(), "IndexVector(");
     SourceRange lbrack_sr(get_end_of_end(sm, base_sr),
-			  idx_sr.getBegin().getLocWithOffset(-1));
+                          idx_sr.getBegin().getLocWithOffset(-1));
     rewriter->ReplaceText(lbrack_sr, ", ");
     rewriter->ReplaceText(aindex->getRBracketLoc(), 1, ")");
   }

@@ -27,7 +27,7 @@ LIBS = \
 all: c2nova
 
 c2nova.o: c2nova.cpp
-	$(CXX) -c -o c2nova.o $(LLVM_CXXFLAGS) $(CXXFLAGS) c2nova.cpp
+	$(CXX) -c -o c2nova.o $(LLVM_CXXFLAGS) $(CPPFLAGS) $(CXXFLAGS) c2nova.cpp
 
 c2nova: c2nova.o
 	$(CXX) -o c2nova c2nova.o $(LLVM_LDFLAGS) $(LIBS)
