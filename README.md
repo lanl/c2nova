@@ -38,7 +38,7 @@ The current implementation of `c2nova` is rather crude.  It therefore exhibits a
 
 * 1-D and 2-D arrays must have a constant number of elements.
 
-* `for` loops need to be expressed directly in Nova: `CUFor(i, IntConst(1), IntConst(10), IntConst(1));`…`CuForEnd();`.
+* `for` loops need to be expressed directly in Nova: `CUFor(i, 1, 10, 1);`…`CuForEnd();`.
 
 * Hiding C constructs behind C macros will often confuse `c2nova`.
 
