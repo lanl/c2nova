@@ -15,6 +15,7 @@
 #include <llvm/Support/CommandLine.h>
 #include <cstdio>
 #include <cstdlib>
+#include <queue>
 
 using namespace clang;
 using namespace clang::ast_matchers;
@@ -29,6 +30,48 @@ static cl::extrahelp CommonHelp(CommonOptionsParser::HelpMessage);
 // Match various operations and convert these to Nova.
 class C_to_Nova : public clang::ast_matchers::MatchFinder::MatchCallback {
 private:
+  // Define how to modify text.
+  typedef enum {
+    mod_ins_before,
+    mod_ins_after,
+    mod_remove,
+    mod_replace
+  } pri_mod_t;
+
+  // Represent a prioritized replacement.
+  class PriRewrite {
+  public:
+    int priority;
+    pri_mod_t operation;
+    SourceRange range;
+    int size;
+    std::string text;
+
+    explicit PriRewrite(int prio, pri_mod_t op, SourceRange sr, std::string txt) :
+      priority(prio),
+      operation(op),
+      range(sr),
+      size(0),
+      text(txt) {
+    }
+
+    explicit PriRewrite(int prio, pri_mod_t op, SourceLocation sl, int sz, std::string txt="") :
+      priority(prio),
+      operation(op),
+      size(sz),
+      text(txt) {
+      range = SourceRange(sl, sl);
+    }
+
+    bool operator<(const PriRewrite& other) const {
+      // Perform smaller-valued priorities first.
+      return priority > other.priority;
+    }
+  };
+
+  // Maintain a priority queue of rewrites to perform.
+  std::priority_queue<PriRewrite> rewrite_queue;
+
   // Redirect source locations corresponding to macro expansions from the macro
   // definition to the macro use.
   SourceLocation fix_sl(SourceManager& sm, SourceLocation sl) {
@@ -51,7 +94,7 @@ private:
   }
 
   // Return the end of the last token in a source range.
-  SourceLocation get_end_of_end(SourceManager& sm, SourceRange sr) {
+  static SourceLocation get_end_of_end(SourceManager& sm, SourceRange sr) {
     SourceLocation end_tok_begin(sr.getEnd());
     LangOptions lopt;
     SourceLocation end_tok_end(Lexer::getLocForEndOfToken(end_tok_begin, 0, sm, lopt));
@@ -59,7 +102,7 @@ private:
   }
 
   // Return the end of a token in a source location.
-  SourceLocation get_end_of_end(SourceManager& sm, SourceLocation sl) {
+  static SourceLocation get_end_of_end(SourceManager& sm, SourceLocation sl) {
     LangOptions lopt;
     SourceLocation end_tok_end(Lexer::getLocForEndOfToken(sl, 0, sm, lopt));
     return end_tok_end;
@@ -98,14 +141,14 @@ private:
   }
 
   // Insert text before and after a given match.
-  void insert_before_and_after(SourceManager& sm, SourceRange& sr,
+  void insert_before_and_after(int priority,
+                               SourceManager& sm, SourceRange& sr,
                                const std::string& before_text,
                                const std::string& after_text) {
     SourceLocation ofs0(sr.getBegin());
     std::string text(get_text(sm, sr));
-    prepare_rewriter(sm);
-    rewriter->InsertTextBefore(ofs0, before_text);
-    rewriter->InsertTextAfter(ofs0.getLocWithOffset(text.length()), after_text);
+    rewrite_queue.push(PriRewrite(priority, mod_ins_before, ofs0, before_text));
+    rewrite_queue.push(PriRewrite(priority, mod_ins_after, ofs0.getLocWithOffset(text.length()), after_text));
   }
 
   // Describe a variable declaration.
@@ -229,23 +272,25 @@ private:
     // Generate a replacement either with or without an initializer.
     std::string declare(std::string("Declare") + where.str() + what.str());
     const Expr* rhs = decl->getInit();
-    prepare_rewriter(sm);
     if (rhs == nullptr)
       // No initializer.
       if (type_info.dimens == 0)
         // Use nice rewriting for declaring scalars.
-        rewriter->ReplaceText(sr, declare + '(' + var_name + ", " + nova_type + ')');
+        rewrite_queue.push(PriRewrite(50, mod_replace, sr,
+                                      declare + '(' + var_name + ", " + nova_type + ')'));
       else
         // Use an ugly hack to define vectors and arrays (commenting out the
         // code we don't know how to transform and inserting all-new code
         // before it).
-        rewriter->InsertText(sr.getBegin(), declare + '(' + var_name + ", " + nova_type + size_args + ");  // ");
+        rewrite_queue.push(PriRewrite(50, mod_ins_before, sr,
+                                      declare + '(' + var_name + ", " + nova_type + size_args + ");  // "));
     else {
       // Initializer.
       SourceRange up_to_rhs(fix_sr(sm, ofs0, rhs->getBeginLoc().getLocWithOffset(-1)));
-      rewriter->ReplaceText(up_to_rhs, declare + "Init(" + var_name + ", " + nova_type + ",");
+      rewrite_queue.push(PriRewrite(50, mod_replace, up_to_rhs,
+                                    declare + "Init(" + var_name + ", " + nova_type + ","));
       SourceLocation ofs1(get_end_of_end(sm, sr));
-      rewriter->InsertTextAfter(ofs1, ")");
+      rewrite_queue.push(PriRewrite(50, mod_ins_after, ofs1, ")"));
     }
   }
 
@@ -256,7 +301,7 @@ private:
       return;
     SourceManager& sm(mresult.Context->getSourceManager());
     SourceRange sr(fix_sr(sm, intLit->getSourceRange()));
-    insert_before_and_after(sm, sr, "IntConst(", ")");
+    insert_before_and_after(10, sm, sr, "IntConst(", ")");
   }
 
   // Wrap floating-point literals with "AConst".
@@ -266,7 +311,7 @@ private:
       return;
     SourceManager& sm(mresult.Context->getSourceManager());
     SourceRange sr(fix_sr(sm, floatLit->getSourceRange()));
-    insert_before_and_after(sm, sr, "AConst(", ")");
+    insert_before_and_after(10, sm, sr, "AConst(", ")");
   }
 
   // Use Cast to cast types.
@@ -293,18 +338,18 @@ private:
     // Perform the cast.
     const ExplicitCastExpr* exp_cast = dyn_cast<ExplicitCastExpr>(cast);
     SourceManager& sm(mresult.Context->getSourceManager());
-    prepare_rewriter(sm);
     SourceRange sr(fix_sr(sm, cast->getSourceRange()));
     if (exp_cast == nullptr)
       // Implicit cast
-      insert_before_and_after(sm, sr, std::string("Cast(") + cast_str + ", ", ")");
+      insert_before_and_after(20, sm, sr, std::string("Cast(") + cast_str + ", ", ")");
     else {
       // Explicit cast
       const Expr* sub_expr = cast->getSubExpr();
       SourceRange sub_sr(fix_sr(sm, sub_expr->getSourceRange()));
       SourceRange type_sr(sr.getBegin(), sub_sr.getBegin().getLocWithOffset(-1));
-      rewriter->ReplaceText(type_sr, std::string("Cast(") + cast_str + ", ");
-      rewriter->InsertTextAfter(get_end_of_end(sm, sr), ")");
+      rewrite_queue.push(PriRewrite(20, mod_replace, type_sr,
+                                    std::string("Cast(") + cast_str + ", "));
+      rewrite_queue.push(PriRewrite(20, mod_ins_after, get_end_of_end(sm, sr), ")"));
     }
   }
 
@@ -356,10 +401,9 @@ private:
 
     // Remove the operator.
     SourceManager& sm(mresult.Context->getSourceManager());
-    prepare_rewriter(sm);
     SourceLocation op_begin = fix_sl(sm, unop->getOperatorLoc());
     std::string op_text(get_text(sm, op_begin));
-    rewriter->RemoveText(op_begin, op_text.size());
+    rewrite_queue.push(PriRewrite(40, mod_remove, op_begin, op_text.size()));
 
     // Specially handle increment and decrement operators by converting them to
     // Set statements.
@@ -371,7 +415,7 @@ private:
     }
 
     // Wrap the operator's argument in a Nova macro plus parentheses.
-    insert_before_and_after(sm, arg_sr, before_text, after_text);
+    insert_before_and_after(40, sm, arg_sr, before_text, after_text);
   }
 
   // Wrap each binary operator in a corresponding Nova macros.
@@ -446,10 +490,9 @@ private:
 
     // Change the operator to a comma.
     SourceManager& sm(mresult.Context->getSourceManager());
-    prepare_rewriter(sm);
     SourceLocation op_loc = fix_sl(sm, binop->getOperatorLoc());
     std::string op_text(get_text(sm, op_loc));
-    rewriter->ReplaceText(op_loc, op_text.size(), ",");
+    rewrite_queue.push(PriRewrite(40, mod_replace, op_loc, op_text.size(), ","));
 
     // Expand compound operators (e.g., "a *= b" becomes "Set(a, Mul(a, b))").
     std::string before_text(mname + '(');
@@ -464,7 +507,7 @@ private:
 
     // Wrap the entire operation in a Nova macro.
     SourceRange sr(fix_sr(sm, binop->getSourceRange()));
-    insert_before_and_after(sm, sr, before_text, after_text);
+    insert_before_and_after(40, sm, sr, before_text, after_text);
   }
 
   // Process vector and array indexing.
@@ -498,9 +541,9 @@ private:
                           idx_sr.getBegin().getLocWithOffset(-1));
     if (base_base == nullptr) {
       // a[i] --> IndexVector(a, i)
-      rewriter->InsertText(base->getBeginLoc(), "IndexVector(");
-      rewriter->ReplaceText(lbrack_sr, ", ");
-      rewriter->ReplaceText(aindex->getRBracketLoc(), 1, ")");
+      rewrite_queue.push(PriRewrite(50, mod_ins_before, base->getBeginLoc(), "IndexVector("));
+      rewrite_queue.push(PriRewrite(50, mod_replace, lbrack_sr, ", "));
+      rewrite_queue.push(PriRewrite(50, mod_replace, aindex->getRBracketLoc(), 1, ")"));
     } else {
       // a[i][j] --> IndexArray(a, i, j)
       SourceRange base_base_sr(fix_sr(sm, base_base->getSourceRange()));
@@ -509,10 +552,11 @@ private:
                                  base_idx_sr.getBegin().getLocWithOffset(-1));
       SourceRange inner_bracks_sr(base_ase->getRBracketLoc(),
                                   idx_sr.getBegin().getLocWithOffset(-1));
-      rewriter->InsertText(base->getBeginLoc(), "IndexArray(");
-      rewriter->ReplaceText(base_lbrack_sr, ", ");
-      rewriter->ReplaceText(inner_bracks_sr, ", ");
-      rewriter->ReplaceText(aindex->getRBracketLoc(), 1, ")");
+      rewrite_queue.push(PriRewrite(50, mod_ins_before, base->getBeginLoc(), "IndexArray("));
+      rewrite_queue.push(PriRewrite(50, mod_replace, base_lbrack_sr, ", "));
+      rewrite_queue.push(PriRewrite(50, mod_replace, inner_bracks_sr, ", "));
+      rewrite_queue.push(PriRewrite(50, mod_replace,
+                                    aindex->getRBracketLoc(), 1, ")"));
     }
   }
 
@@ -522,12 +566,11 @@ private:
     if (call == nullptr)
       return;
     SourceManager& sm(mresult.Context->getSourceManager());
-    prepare_rewriter(sm);
     const Expr* callee = call->getCallee();
     SourceRange sr(fix_sr(sm, callee->getSourceRange()));
     std::string callee_name = get_text(sm, sr);
     if (callee_name == "sqrt")
-      rewriter->ReplaceText(sr.getBegin(), 4, "Sqrt");
+      rewrite_queue.push(PriRewrite(40, mod_replace, sr.getBegin(), 4, "Sqrt"));
   }
 
   // Process if statements.  These are normally scheduled to execute on the
@@ -544,43 +587,70 @@ private:
     std::string if_text(get_text(sm, if_sr));
     std::string if_name("ApeIf");
     std::string else_name("ApeElse()");
-    std::string fi_name("ApeFi()");
+    std::string fi_name("\nApeFi()");
     if (if_text == "CU_IF") {
       if_name = "CUIf";
       else_name = "CUElse()";
-      fi_name = "CUFi()";
+      fi_name = "\nCUFi()";
     }
 
     // Replace "if".
-    prepare_rewriter(sm);
-    rewriter->ReplaceText(if_sr, if_name);
+    rewrite_queue.push(PriRewrite(60, mod_replace, if_sr, if_name));
 
     // Replace "else", if present.
     SourceLocation else_begin(fix_sl(sm, if_stmt->getElseLoc()));
     if (else_begin.isValid()) {
       SourceLocation else_end(get_end_of_end(sm, else_begin));
       SourceRange else_sr(else_begin, else_end);
-      rewriter->ReplaceText(else_sr, else_name);
+      rewrite_queue.push(PriRewrite(60, mod_replace, else_sr, else_name));
     }
 
     // Insert "fi" at the end of the statement.
     SourceLocation end_loc(fix_sl(sm, if_stmt->getEndLoc()));
     SourceLocation fi_loc(get_end_of_end(sm, end_loc));
-    rewriter->InsertTextAfterToken(fi_loc, fi_name);
-  }
-
-  // Initialize the rewriter if we haven't already.
-  void prepare_rewriter(SourceManager& sm) {
-    if (rewriter != nullptr)
-      return;
-    CompilerInstance comp_inst;
-    rewriter = new Rewriter();
-    rewriter->setSourceMgr(sm, comp_inst.getLangOpts());
+    rewrite_queue.push(PriRewrite(60, mod_ins_after, fi_loc, fi_name));
   }
 
 public:
   // Provide a do-nothing constructor.
   explicit C_to_Nova() {}
+
+  // Rewriter to use for modifying the source code.
+  Rewriter* rewriter = nullptr;
+
+  // On the first pass, we enqueue modifications in rewrite_queue.  On the
+  // second pass, we apply these modifications in priority order.
+  int pass = 1;
+
+  // Apply all queued modifications in priority order.
+  void apply_modifications(SourceManager* sm) {
+    // Create a rewriter.
+    CompilerInstance comp_inst;
+    rewriter = new Rewriter();
+    rewriter->setSourceMgr(*sm, comp_inst.getLangOpts());
+
+    // Apply each modification in turn.
+    for (; !rewrite_queue.empty(); rewrite_queue.pop()) {
+      const PriRewrite& mod = rewrite_queue.top();
+      switch (mod.operation) {
+      case mod_ins_before:
+        rewriter->InsertTextBefore(mod.range.getBegin(), mod.text);
+        break;
+      case mod_ins_after:
+        rewriter->InsertTextAfter(mod.range.getBegin(), mod.text);
+        break;
+      case mod_remove:
+        rewriter->RemoveText(mod.range.getBegin(), mod.size);
+        break;
+      case mod_replace:
+        rewriter->ReplaceText(mod.range, mod.text);
+        break;
+      default:
+        std::abort(); // Should never get here
+        break;
+      }
+    }
+  }
 
   // Return a modified source file as a string.
   std::string get_modifications() {
@@ -591,9 +661,6 @@ public:
       rewriter->getRewriteBufferFor(sm.getMainFileID());
     return std::string(buf->begin(), buf->end());
   }
-
-  // Rewriter to use for modifying the source code.
-  Rewriter* rewriter = nullptr;
 
   // Add a set of matchers to a finder.
   void add_matchers(MatchFinder& mfinder) {
@@ -625,15 +692,32 @@ public:
 
   // Process all of our matches.
   virtual void run(const MatchFinder::MatchResult& mresult) {
-    process_integer_literal(mresult);
-    process_float_literal(mresult);
-    process_var_decl(mresult);
-    process_cast_expr(mresult);
-    process_unary_operator(mresult);
-    process_binary_operator(mresult);
-    process_array_index(mresult);
-    process_function_call(mresult);
-    process_if_statement(mresult);
+    switch (pass) {
+    case 1:
+      process_integer_literal(mresult);
+      process_float_literal(mresult);
+      process_cast_expr(mresult);
+      process_unary_operator(mresult);
+      process_binary_operator(mresult);
+      process_array_index(mresult);
+      process_function_call(mresult);
+      process_var_decl(mresult);
+      process_if_statement(mresult);
+      break;
+
+    case 2:
+      apply_modifications(mresult.SourceManager);
+      pass = 3;
+      break;
+
+    case 3:
+      // Do-nothing pass
+      break;
+
+    default:
+      std::abort();
+      break;
+    }
   }
 };
 
@@ -684,6 +768,13 @@ int main(int argc, const char **argv) {
 
   // Run our Clang tool.
   int run_result = tool.run(newFrontendActionFactory(&mfinder).get());
+  if (run_result != 0)
+    return run_result;
+
+  // As a hack, run our tool again in "apply modifications" mode.  We need to
+  // do this to gain access to a live SourceManager object.
+  c2n.pass++;
+  run_result = tool.run(newFrontendActionFactory(&mfinder).get());
   if (run_result != 0)
     return run_result;
 
