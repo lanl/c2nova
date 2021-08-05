@@ -36,21 +36,19 @@ Limitations
 
 The current implementation of `c2nova` is rather crude.  It therefore exhibits a number of limitations:
 
-* 1-D and 2-D arrays must have a constant number of elements.
+* 1-D and 2-D arrays must have a constant number of elements.  3-D and higher-dimensional arrays are not supported.
 
 * `for` loops need to be expressed directly in Nova: `CUFor(i, 1, 10, 1);`…`CuForEnd();`.
 
 * Hiding C constructs behind C macros will often confuse `c2nova`.
 
-* All C integer data types are mapped to a Nova `Int`, and all C floating-point data types are mapped to a nova `Approx`.  No other data types are supported.
+* The C99 `_Bool` type is mapped to a Nova `Bool`.  All other C integer data types are mapped to a Nova `Int`.  All C floating-point data types are mapped to a nova `Approx`.  No other data types are supported.
 
 * Pre/post increment/decrement (i.e., `x++`, `x--`, `++x`, and `--x`) must appear only as standalone statements, not as expressions nested within other expressions.
 
 * C operations with no Nova equivalent (e.g., `%`) are left untranslated.
 
 * Function headers (e.g., `int myfunc(int x)`) have no Nova equivalent but will be translated anyway.
-
-* Array accesses appearing on the left-hand side of a compound assignment operator (e.g., `+=`) will not be translated to Nova.
 
 * `c2nova` will translate casts between integers and floating-point values, but these are not actually supported by Nova.
 
