@@ -287,7 +287,7 @@ private:
     // As a special case, top-level variables can only be declared, not defined.
     std::string declare(where.str() + what.str());
     if (decl->hasGlobalStorage())
-      rewrite_queue.push(PriRewrite(60, mod_ins_before, sr,
+      rewrite_queue.push(PriRewrite(70, mod_ins_before, sr,
                                     std::string("Declare(") + var_name + ");  // Within a function: "));
     else
       declare = std::string("Declare") + declare;
@@ -298,21 +298,21 @@ private:
       // No initializer.
       if (type_info.dimens == 0)
         // Use nice rewriting for declaring scalars.
-        rewrite_queue.push(PriRewrite(60, mod_replace, sr,
+        rewrite_queue.push(PriRewrite(70, mod_replace, sr,
                                       declare + '(' + var_name + ", " + nova_type + ')'));
       else
         // Use an ugly hack to define vectors and arrays (commenting out the
         // code we don't know how to transform and inserting all-new code
         // before it).
-        rewrite_queue.push(PriRewrite(60, mod_ins_before, sr,
+        rewrite_queue.push(PriRewrite(70, mod_ins_before, sr,
                                       declare + '(' + var_name + ", " + nova_type + size_args + ");  // "));
     else {
       // Initializer.
       SourceRange up_to_rhs(fix_sr(sm, ofs0, rhs->getBeginLoc().getLocWithOffset(-1)));
-      rewrite_queue.push(PriRewrite(60, mod_replace, up_to_rhs,
+      rewrite_queue.push(PriRewrite(70, mod_replace, up_to_rhs,
                                     declare + "Init(" + var_name + ", " + nova_type + ","));
       SourceLocation ofs1(get_end_of_end(sm, sr));
-      rewrite_queue.push(PriRewrite(60, mod_ins_after, ofs1, ")"));
+      rewrite_queue.push(PriRewrite(70, mod_ins_after, ofs1, ")"));
     }
   }
 
@@ -363,15 +363,15 @@ private:
     SourceRange sr(fix_sr(sm, cast->getSourceRange()));
     if (exp_cast == nullptr)
       // Implicit cast
-      insert_before_and_after(50, sm, sr, std::string("Cast(") + cast_str + ", ", ")");
+      insert_before_and_after(60, sm, sr, std::string("Cast(") + cast_str + ", ", ")");
     else {
       // Explicit cast
       const Expr* sub_expr = cast->getSubExpr();
       SourceRange sub_sr(fix_sr(sm, sub_expr->getSourceRange()));
       SourceRange type_sr(sr.getBegin(), sub_sr.getBegin().getLocWithOffset(-1));
-      rewrite_queue.push(PriRewrite(50, mod_replace, type_sr,
+      rewrite_queue.push(PriRewrite(60, mod_replace, type_sr,
                                     std::string("Cast(") + cast_str + ", "));
-      rewrite_queue.push(PriRewrite(50, mod_ins_after, get_end_of_end(sm, sr), ")"));
+      rewrite_queue.push(PriRewrite(60, mod_ins_after, get_end_of_end(sm, sr), ")"));
     }
   }
 
@@ -425,7 +425,7 @@ private:
     SourceManager& sm(mresult.Context->getSourceManager());
     SourceLocation op_begin = fix_sl(sm, unop->getOperatorLoc());
     std::string op_text(get_text(sm, op_begin));
-    rewrite_queue.push(PriRewrite(40, mod_remove, op_begin, op_text.size()));
+    rewrite_queue.push(PriRewrite(50, mod_remove, op_begin, op_text.size()));
 
     // Specially handle increment and decrement operators by converting them to
     // Set statements.
@@ -437,7 +437,7 @@ private:
     }
 
     // Wrap the operator's argument in a Nova macro plus parentheses.
-    insert_before_and_after(40, sm, arg_sr, before_text, after_text);
+    insert_before_and_after(50, sm, arg_sr, before_text, after_text);
   }
 
   // Wrap each binary operator in a corresponding Nova macros.
@@ -526,7 +526,7 @@ private:
     SourceManager& sm(mresult.Context->getSourceManager());
     SourceLocation op_loc = fix_sl(sm, binop->getOperatorLoc());
     std::string op_text(get_text(sm, op_loc));
-    rewrite_queue.push(PriRewrite(40, mod_replace, op_loc, op_text.size(), ","));
+    rewrite_queue.push(PriRewrite(50, mod_replace, op_loc, op_text.size(), ","));
 
     // Expand compound operators (e.g., "a *= b" becomes "Set(a, Mul(a, b))").
     std::string before_text(mname + '(');
@@ -541,7 +541,7 @@ private:
 
     // Wrap the entire operation in a Nova macro.
     SourceRange sr(fix_sr(sm, binop->getSourceRange()));
-    insert_before_and_after(40, sm, sr, before_text, after_text);
+    insert_before_and_after(50, sm, sr, before_text, after_text);
   }
 
   // Process vector and array indexing.
@@ -575,9 +575,9 @@ private:
                           idx_sr.getBegin().getLocWithOffset(-1));
     if (base_base == nullptr) {
       // a[i] --> IndexVector(a, i)
-      rewrite_queue.push(PriRewrite(60, mod_ins_before, base->getBeginLoc(), "IndexVector("));
-      rewrite_queue.push(PriRewrite(60, mod_replace, lbrack_sr, ", "));
-      rewrite_queue.push(PriRewrite(60, mod_replace, aindex->getRBracketLoc(), 1, ")"));
+      rewrite_queue.push(PriRewrite(40, mod_ins_before, base->getBeginLoc(), "IndexVector("));
+      rewrite_queue.push(PriRewrite(40, mod_replace, lbrack_sr, ", "));
+      rewrite_queue.push(PriRewrite(40, mod_replace, aindex->getRBracketLoc(), 1, ")"));
     } else {
       // a[i][j] --> IndexArray(a, i, j)
       SourceRange base_base_sr(fix_sr(sm, base_base->getSourceRange()));
@@ -586,10 +586,10 @@ private:
                                  base_idx_sr.getBegin().getLocWithOffset(-1));
       SourceRange inner_bracks_sr(base_ase->getRBracketLoc(),
                                   idx_sr.getBegin().getLocWithOffset(-1));
-      rewrite_queue.push(PriRewrite(60, mod_ins_before, base->getBeginLoc(), "IndexArray("));
-      rewrite_queue.push(PriRewrite(60, mod_replace, base_lbrack_sr, ", "));
-      rewrite_queue.push(PriRewrite(60, mod_replace, inner_bracks_sr, ", "));
-      rewrite_queue.push(PriRewrite(60, mod_replace,
+      rewrite_queue.push(PriRewrite(40, mod_ins_before, base->getBeginLoc(), "IndexArray("));
+      rewrite_queue.push(PriRewrite(40, mod_replace, base_lbrack_sr, ", "));
+      rewrite_queue.push(PriRewrite(40, mod_replace, inner_bracks_sr, ", "));
+      rewrite_queue.push(PriRewrite(40, mod_replace,
                                     aindex->getRBracketLoc(), 1, ")"));
     }
   }
@@ -604,7 +604,7 @@ private:
     SourceRange sr(fix_sr(sm, callee->getSourceRange()));
     std::string callee_name = get_text(sm, sr);
     if (callee_name == "sqrt")
-      rewrite_queue.push(PriRewrite(40, mod_replace, sr.getBegin(), 4, "Sqrt"));
+      rewrite_queue.push(PriRewrite(50, mod_replace, sr.getBegin(), 4, "Sqrt"));
   }
 
   // Process if statements.  These are normally scheduled to execute on the
@@ -629,20 +629,20 @@ private:
     }
 
     // Replace "if".
-    rewrite_queue.push(PriRewrite(70, mod_replace, if_sr, if_name));
+    rewrite_queue.push(PriRewrite(80, mod_replace, if_sr, if_name));
 
     // Replace "else", if present.
     SourceLocation else_begin(fix_sl(sm, if_stmt->getElseLoc()));
     if (else_begin.isValid()) {
       SourceLocation else_end(get_end_of_end(sm, else_begin));
       SourceRange else_sr(else_begin, else_end);
-      rewrite_queue.push(PriRewrite(70, mod_replace, else_sr, else_name));
+      rewrite_queue.push(PriRewrite(80, mod_replace, else_sr, else_name));
     }
 
     // Insert "fi" at the end of the statement.
     SourceLocation end_loc(fix_sl(sm, if_stmt->getEndLoc()));
     SourceLocation fi_loc(get_end_of_end(sm, end_loc));
-    rewrite_queue.push(PriRewrite(70, mod_ins_after, fi_loc, fi_name));
+    rewrite_queue.push(PriRewrite(80, mod_ins_after, fi_loc, fi_name));
   }
 
 public:
