@@ -440,6 +440,28 @@ private:
     insert_before_and_after(50, sm, arg_sr, before_text, after_text);
   }
 
+  // As a helper function for process_binary_operator(), handle the case of a
+  // compound operator with an array subscript expression on the left-hand side.
+  void process_binary_operator_ase(SourceManager& sm,
+                                   const BinaryOperator* binop,
+                                   const std::string& mname) {
+    // Store the left-hand side in an scExpr.
+    SourceRange sr(fix_sr(sm, binop->getSourceRange()));
+    rewrite_queue.push(PriRewrite(50, mod_ins_before, sr.getBegin(),
+                                  std::string("do { scExpr Nova_LHS = ")));
+
+    // Replace the operator with its Nova name.
+    SourceLocation op_loc = fix_sl(sm, binop->getOperatorLoc());
+    SourceRange op_sr(op_loc, get_end_of_end(sm, op_loc));
+    rewrite_queue.push(PriRewrite(50, mod_replace, op_sr,
+                                  std::string("; Set(Nova_LHS, ") + mname + "(Nova_LHS,"));
+
+    // Append some boilerplate text after the BinaryOperator.
+    rewrite_queue.push(PriRewrite(50, mod_ins_after,
+                                  get_end_of_end(sm, sr.getEnd()),
+                                  ")); } while (0)"));
+  }
+
   // Wrap each binary operator in a corresponding Nova macros.
   void process_binary_operator(const MatchFinder::MatchResult& mresult) {
     // Map a Clang operator to a Nova macro name.
@@ -522,11 +544,10 @@ private:
       return;  // Unknown operator
     }
 
-    // Change the operator to a comma.
+    // Prepare to change the operator to a comma.
     SourceManager& sm(mresult.Context->getSourceManager());
     SourceLocation op_loc = fix_sl(sm, binop->getOperatorLoc());
     std::string op_text(get_text(sm, op_loc));
-    rewrite_queue.push(PriRewrite(50, mod_replace, op_loc, op_text.size(), ","));
 
     // Expand compound operators (e.g., "a *= b" becomes "Set(a, Mul(a, b))").
     std::string before_text(mname + '(');
@@ -535,11 +556,17 @@ private:
       Expr* lhs = binop->getLHS();
       SourceRange sr(fix_sr(sm, lhs->getSourceRange()));
       std::string lhs_text(get_text(sm, sr));
+      if (dyn_cast<ArraySubscriptExpr>(lhs) != nullptr)
+        // Nova does not provide macros for compound operators, and we can't
+        // access a previously translated piece of code at this point.  Hence,
+        // we drop to one level below Nova and work directly with an scExpr.
+        return process_binary_operator_ase(sm, binop, mname);
       before_text = std::string("Set(") + lhs_text + ", " + before_text;
       after_text += ')';
     }
 
     // Wrap the entire operation in a Nova macro.
+    rewrite_queue.push(PriRewrite(50, mod_replace, op_loc, op_text.size(), ","));
     SourceRange sr(fix_sr(sm, binop->getSourceRange()));
     insert_before_and_after(50, sm, sr, before_text, after_text);
   }
