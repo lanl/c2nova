@@ -30,6 +30,8 @@ static cl::extrahelp CommonHelp(CommonOptionsParser::HelpMessage);
 // Match various operations and convert these to Nova.
 class C_to_Nova : public clang::ast_matchers::MatchFinder::MatchCallback {
 private:
+  const bool translate_implicit_casts = false;  // true: translate implicit casts; false: explicit casts only
+
   // Define how to modify text.
   typedef enum {
     mod_ins_before,
@@ -361,9 +363,11 @@ private:
     const ExplicitCastExpr* exp_cast = dyn_cast<ExplicitCastExpr>(cast);
     SourceManager& sm(mresult.Context->getSourceManager());
     SourceRange sr(fix_sr(sm, cast->getSourceRange()));
-    if (exp_cast == nullptr)
+    if (exp_cast == nullptr) {
       // Implicit cast
-      insert_before_and_after(60, sm, sr, std::string("Cast(") + cast_str + ", ", ")");
+      if (translate_implicit_casts)
+        insert_before_and_after(60, sm, sr, std::string("Cast(") + cast_str + ", ", ")");
+    }
     else {
       // Explicit cast
       const Expr* sub_expr = cast->getSubExpr();
