@@ -345,7 +345,8 @@ private:
     if (cast == nullptr)
       return;
     std::string cast_str;
-    switch (cast->getCastKind()) {
+    const CastKind ck = cast->getCastKind();
+    switch (ck) {
     case CK_FloatingToIntegral:
       cast_str = "Int";
       break;
@@ -361,7 +362,8 @@ private:
 
     // Perform the cast.
     const ExplicitCastExpr* exp_cast = dyn_cast<ExplicitCastExpr>(cast);
-    SourceManager& sm(mresult.Context->getSourceManager());
+    ASTContext* ctx = mresult.Context;
+    SourceManager& sm(ctx->getSourceManager());
     SourceRange sr(fix_sr(sm, cast->getSourceRange()));
     if (exp_cast == nullptr) {
       // Implicit cast
@@ -376,6 +378,24 @@ private:
       rewrite_queue.push(PriRewrite(60, mod_replace, type_sr,
                                     std::string("Cast(") + cast_str + ", "));
       rewrite_queue.push(PriRewrite(60, mod_ins_after, get_end_of_end(sm, sr), ")"));
+    }
+
+    // Warn about unsupported casts.
+    if (ck == CK_IntegralToFloating || ck == CK_FloatingToIntegral) {
+      DiagnosticsEngine& de = ctx->getDiagnostics();
+      unsigned int id_no_int_support =
+        de.getCustomDiagID(clang::DiagnosticsEngine::Warning,
+                                 "Nova does not support casts from %0 to %1");
+      DiagnosticBuilder db = de.Report(sr.getBegin(), id_no_int_support);
+      if (ck == CK_IntegralToFloating) {
+        db.AddString("integers");
+        db.AddString("floats");
+      }
+      else {
+        db.AddString("floats");
+        db.AddString("integers");
+      }
+      db.AddSourceRange(clang::CharSourceRange::getCharRange(sr));
     }
   }
 
