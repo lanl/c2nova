@@ -473,7 +473,8 @@ private:
     if (binop == nullptr)
       return;
     std::string mname;
-    switch (binop->getOpcode()) {
+    BinaryOperator::Opcode op = binop->getOpcode();
+    switch (op) {
       // Arithmetic operators (number op number -> number)
     case BO_Add:
     case BO_AddAssign:
@@ -549,9 +550,38 @@ private:
     }
 
     // Prepare to change the operator to a comma.
-    SourceManager& sm(mresult.Context->getSourceManager());
+    ASTContext* ctx = mresult.Context;
+    SourceManager& sm(ctx->getSourceManager());
     SourceLocation op_loc = fix_sl(sm, binop->getOperatorLoc());
     std::string op_text(get_text(sm, op_loc));
+
+    // Issue a warning message for unsupported integer operations.
+    const clang::Type& op_type = *binop->getType();
+    BinaryOperator::Opcode base_op = binop->isCompoundAssignmentOp(op)
+      ? binop->getOpForCompoundAssignment(op)
+      : op;
+    if (binop->isMultiplicativeOp(base_op) && op_type.isIntegerType()) {
+      DiagnosticsEngine& de = ctx->getDiagnostics();
+      unsigned int id_no_int_support =
+        de.getCustomDiagID(clang::DiagnosticsEngine::Warning,
+                                 "Nova does not support integer %0");
+      DiagnosticBuilder db = de.Report(op_loc, id_no_int_support);
+      switch (base_op) {
+      case BO_Div:
+        db.AddString("division");
+        break;
+      case BO_Mul:
+        db.AddString("multiplication");
+        break;
+      default:
+        // I don't think we should ever get here, but let's include some
+        // generic text just in case.
+        db.AddString("operations of this sort");
+        break;
+      }
+      SourceRange sr(fix_sr(sm, binop->getSourceRange()));
+      db.AddSourceRange(clang::CharSourceRange::getCharRange(sr));
+    }
 
     // Expand compound operators (e.g., "a *= b" becomes "Set(a, Mul(a, b))").
     std::string before_text(mname + '(');
