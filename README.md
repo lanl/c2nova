@@ -6,6 +6,15 @@ Description
 
 This program translates simple kernels of C code to [Singular Computing](https://www.singularcomputing.com/)'s Nova macro language.
 
+Installation
+------------
+
+`c2nova` requires [Clang](https://clang.llvm.org/) and the Clang libraries.  Given those, a simple
+```
+make
+```
+should work.  At the time of this writing, `c2nova` has been tested only with Clang 12 and only on Linux, but it should be portable to other platforms.
+
 Usage
 -----
 
@@ -55,6 +64,16 @@ The current implementation of `c2nova` is rather crude.  It therefore exhibits a
 * `c2nova` will translate integer multiplication and division, but these are not actually supported by Nova.
 
 As of this writing, `c2nova` has not been tested against the actual Nova macro library.  It is quite possible that *nothing* works.
+
+Legal statement
+---------------
+
+Copyright © 2021 Triad National Security, LLC.
+All rights reserved.
+
+This program was produced under U.S. Government contract 89233218CNA000001 for Los Alamos National Laboratory (LANL), which is operated by Triad National Security, LLC for the U.S.  Department of Energy/National Nuclear Security Administration. All rights in the program are reserved by Triad National Security, LLC, and the U.S. Department of Energy/National Nuclear Security Administration. The Government is granted for itself and others acting on its behalf a nonexclusive, paid-up, irrevocable worldwide license in this material to reproduce, prepare derivative works, distribute copies to the public, perform publicly and display publicly, and to permit others to do so.
+
+This program is open source under the [BSD-3 License](LICENSE.md).  Its LANL-internal identifier is C21041.
 
 Author
 ------
