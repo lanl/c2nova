@@ -3,6 +3,9 @@
 # By Scott Pakin <pakin@lanl.gov> #
 ###################################
 
+prefix = /usr/local
+bindir = $(prefix)/bin
+INSTALL = install
 CXX = clang++
 CXXFLAGS = -g -Wall
 LLVM_CXXFLAGS = $(shell llvm-config --cxxflags)
@@ -32,7 +35,11 @@ c2nova.o: c2nova.cpp
 c2nova: c2nova.o
 	$(CXX) -o c2nova c2nova.o $(LLVM_LDFLAGS) $(LIBS)
 
+install: c2nova
+	$(INSTALL) -m 0755 -d $(DESTDIR)$(bindir)
+	$(INSTALL) -m 0755 c2nova $(DESTDIR)$(bindir)
+
 clean:
 	$(RM) c2nova.o c2nova
 
-.PHONY: all clean
+.PHONY: all install clean
